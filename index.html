@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="造物集文创产品开发进度管理平台">
+  <title>造物集 · 文创产品开发管理平台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2318352d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' fill='white'%3E造%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand" data-nav="dashboard">
+        <div class="brand-mark"><span>造</span><i></i></div>
+        <div><strong>造物集</strong><small>文创业务管理平台</small></div>
+      </div>
+      <nav class="main-nav" id="mainNav">
+        <p class="nav-label">工作空间</p>
+        <button class="nav-item active" data-nav="dashboard"><span data-icon="grid"></span><b>综合看板</b></button>
+        <button class="nav-item" data-nav="projects"><span data-icon="route"></span><b>开发进度</b><em id="projectNavCount">0</em></button>
+        <button class="nav-item" data-nav="tasks"><span data-icon="check"></span><b>员工工作</b><em class="warm" id="taskNavCount">0</em></button>
+        <p class="nav-label">业务管理</p>
+        <button class="nav-item" data-nav="clients"><span data-icon="users"></span><b>客户管理</b></button>
+        <button class="nav-item" data-nav="products"><span data-icon="box"></span><b>产品信息</b></button>
+        <button class="nav-item" data-nav="inventory"><span data-icon="layers"></span><b>库存管理</b></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-note">
+          <div class="side-note-icon" data-icon="spark"></div>
+          <strong>让好创意，如期发生</strong>
+          <p>项目、产品与团队协作，<br>在一处清晰流转。</p>
+        </div>
+        <button class="profile" id="profileBtn">
+          <span class="avatar">林</span>
+          <span><strong>林然</strong><small>业务管理员</small></span>
+          <i data-icon="more"></i>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" id="menuToggle" aria-label="打开菜单"><span data-icon="menu"></span></button>
+        <div class="global-search">
+          <span data-icon="search"></span>
+          <input id="globalSearch" type="search" placeholder="搜索客户、产品或项目…" autocomplete="off">
+          <kbd>⌘ K</kbd>
+          <div class="search-results" id="searchResults"></div>
+        </div>
+        <div class="topbar-actions">
+          <span class="today-label" id="todayLabel"></span>
+          <button class="icon-btn" id="exportBtn" title="导出当前数据"><span data-icon="download"></span></button>
+          <button class="icon-btn notification-btn" id="notificationBtn" title="节点提醒"><span data-icon="bell"></span><i id="notificationDot"></i></button>
+          <button class="primary-btn top-add" id="quickAddBtn"><span data-icon="plus"></span>新建项目</button>
+        </div>
+      </header>
+      <div class="page-container" id="pageContent"></div>
+    </main>
+  </div>
+
+  <div class="drawer-mask" id="drawerMask"></div>
+  <aside class="notification-drawer" id="notificationDrawer">
+    <div class="drawer-header"><div><span class="eyebrow">REMINDERS</span><h2>关键节点提醒</h2></div><button class="icon-btn" data-close="drawer"><span data-icon="x"></span></button></div>
+    <div class="reminder-summary" id="reminderSummary"></div>
+    <div class="drawer-content" id="reminderList"></div>
+  </aside>
+
+  <div class="modal-mask" id="modalMask">
+    <section class="modal" id="modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><div><span class="eyebrow" id="modalEyebrow">CREATE</span><h2 id="modalTitle"></h2><p id="modalSubtitle"></p></div><button class="icon-btn" data-close="modal"><span data-icon="x"></span></button></div>
+      <div id="modalBody"></div>
+    </section>
+  </div>
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="mobile-mask" id="mobileMask"></div>
+  <script src="app.js"></script>
+</body>
+</html>
