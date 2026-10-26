@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f5f0">
+  <meta name="description" content="造物集文创产品开发管理平台手机版">
+  <title>造物集 · 移动工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2318352d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' fill='white'%3E造%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="mobile.css">
+</head>
+<body class="mobile-body mobile-loading">
+  <div class="mobile-device">
+    <header class="m-header">
+      <button class="m-brand" data-mnav="dashboard" aria-label="返回首页">
+        <span class="m-brand-mark">造<i></i></span>
+        <span><strong>造物集</strong><small id="mHeaderSub">移动工作台</small></span>
+      </button>
+      <div class="m-header-actions">
+        <button class="m-icon-btn" data-action="export" data-type="dashboard" title="导出数据"><span data-micon="download"></span></button>
+        <button class="m-icon-btn m-bell" id="notificationBtn" title="节点提醒"><span data-micon="bell"></span><i id="notificationDot"></i></button>
+        <button class="m-add-btn" id="quickAddBtn"><span data-micon="plus"></span></button>
+      </div>
+    </header>
+
+    <main class="m-main" id="pageContent"></main>
+
+    <nav class="m-bottom-nav" aria-label="主导航">
+      <button data-mnav="dashboard" class="active"><span data-micon="grid"></span><b>首页</b></button>
+      <button data-mnav="projects"><span data-micon="route"></span><b>项目</b><em id="projectNavCount">0</em></button>
+      <button data-mnav="tasks"><span data-micon="check"></span><b>任务</b><em class="warm" id="taskNavCount">0</em></button>
+      <button data-mnav="clients"><span data-micon="users"></span><b>客户</b></button>
+      <button data-mnav="products"><span data-micon="box"></span><b>产品</b></button>
+      <button data-mnav="inventory"><span data-micon="layers"></span><b>库存</b></button>
+    </nav>
+  </div>
+
+  <!-- 桌面版共用的业务弹窗、提醒抽屉和提示容器 -->
+  <div class="drawer-mask" id="drawerMask"></div>
+  <aside class="notification-drawer" id="notificationDrawer">
+    <div class="drawer-header"><div><span class="eyebrow">REMINDERS</span><h2>关键节点提醒</h2></div><button class="icon-btn" data-close="drawer"><span data-icon="x"></span></button></div>
+    <div class="reminder-summary" id="reminderSummary"></div>
+    <div class="drawer-content" id="reminderList"></div>
+  </aside>
+  <div class="modal-mask" id="modalMask">
+    <section class="modal" id="modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><div><span class="eyebrow" id="modalEyebrow">CREATE</span><h2 id="modalTitle"></h2><p id="modalSubtitle"></p></div><button class="icon-btn" data-close="modal"><span data-icon="x"></span></button></div>
+      <div id="modalBody"></div>
+    </section>
+  </div>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- app.js 初始化所需的兼容节点，不参与移动端视觉布局 -->
+  <div class="m-compat" aria-hidden="true">
+    <span id="todayLabel"></span>
+    <button id="exportBtn"></button>
+    <button id="profileBtn"></button>
+    <button id="menuToggle"></button>
+    <div id="mobileMask"></div>
+    <input id="globalSearch" autocomplete="off">
+    <div id="searchResults"></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="mobile.js"></script>
+</body>
+</html>

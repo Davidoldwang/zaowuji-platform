@@ -54,6 +54,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .side-note-icon { color: var(--green); margin-bottom: 10px; }
 .side-note strong { font-family: 'Noto Serif SC',serif; font-size: 12px; }
 .side-note p { font-size: 10px; line-height: 1.8; color: var(--muted); margin: 6px 0 0; }
+.mobile-entry { display: flex; align-items: center; gap: 9px; margin: 0 4px 2px; padding: 10px 11px; border: 1px solid #dfe6dc; border-radius: 10px; background: #f5f8f3; color: var(--ink); text-decoration: none; transition: .2s; }
+.mobile-entry:hover { background: var(--green-soft); border-color: #cddbcF; }
+.mobile-entry-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 7px; background: white; color: var(--green); box-shadow: 0 2px 5px rgba(31,90,70,.07); }
+.mobile-entry-icon svg { width: 14px; height: 14px; }
+.mobile-entry span:nth-child(2) { min-width: 0; }
+.mobile-entry strong,.mobile-entry small { display: block; }
+.mobile-entry strong { font-size: 11px; font-weight: 600; }
+.mobile-entry small { color: var(--muted); font-size: 9px; margin-top: 2px; }
+.mobile-entry > i { margin-left: auto; display: flex; color: var(--muted); }
+.mobile-entry > i svg { width: 12px; height: 12px; }
 .profile { width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; display: flex; align-items: center; gap: 10px; padding: 16px 5px 0; color: var(--ink); text-align: left; }
 .avatar { width: 33px; height: 33px; border-radius: 50%; display: grid; place-items: center; background: #dce8dc; color: var(--green); font-family: 'Noto Serif SC',serif; font-weight: 700; }
 .profile strong,.profile small { display: block; }

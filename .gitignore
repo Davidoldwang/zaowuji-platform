@@ -1,0 +1,13 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 本地验证脚本与截图
+verify.js
+verify-mobile.js
+*.png
+
+# 编辑器与工作区数据
+.workbuddy/
+.DS_Store
+Thumbs.db

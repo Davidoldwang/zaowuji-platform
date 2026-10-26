@@ -1,0 +1,13 @@
+{
+  "name": "zaowuji-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "造物集 · 文创产品开发进度管理平台（电脑版 + 手机版）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
