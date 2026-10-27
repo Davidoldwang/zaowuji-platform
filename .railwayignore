@@ -1,0 +1,9 @@
+# 部署只需运行文件，排除开发与验证产物
+.git/
+.gitignore
+dist/
+.workbuddy/
+node_modules/
+*.png
+verify.js
+verify-mobile.js
