@@ -4,6 +4,7 @@ dist/
 
 # 本地验证脚本与截图
 verify*.js
+shot*.js
 *.png
 
 # 编辑器与工作区数据
@@ -12,3 +13,4 @@ verify*.js
 Thumbs.db
 data/
 .localdata/
+.testdata/

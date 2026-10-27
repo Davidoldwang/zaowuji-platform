@@ -40,6 +40,10 @@ const icons = {
   x: '<path d="m6 6 12 12M18 6 6 18"/>',
   arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
   logout: '<path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h9"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+  shield: '<path d="M12 3 5 6v6c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M17 4h4v4"/>',
+  swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -179,6 +183,24 @@ let saveTimer = null;
 let savingPending = false;
 let resaveAfter = false;
 
+/* ---------------- 角色与权限 ----------------
+ * admin   企业管理员：全部权限，含员工账号管理
+ * manager 店长：可查看与编辑业务数据，所有查看与修改写入操作记录
+ * staff   员工：只读，仅可更新自己负责任务的进度
+ */
+const ROLE_LABEL = {admin:'企业管理员', manager:'店长', staff:'员工'};
+const ROLE_ENTRY = {admin:'企业入口', manager:'员工入口', staff:'员工入口'};
+const roleOf = () => (session && session.user && session.user.role) || 'staff';
+const isAdmin = () => roleOf() === 'admin';
+const isManager = () => roleOf() === 'manager';
+const isStaff = () => roleOf() === 'staff';
+const canEdit = () => !isStaff();            // 可编辑业务数据
+const canManageAccounts = () => isAdmin();   // 可管理登录账号
+const canViewLogs = () => !isStaff();        // 可查看操作记录
+
+const PAGE_LABEL = {dashboard:'综合看板',projects:'开发进度',tasks:'员工工作',staff:'员工管理',clients:'客户管理',products:'产品信息',inventory:'库存管理',logs:'修改记录'};
+const ACTION_LABEL = {view:'查看',create:'新增',update:'修改',delete:'删除',login:'登录',logout:'退出',account:'账号'};
+
 // 未登录时带上当前页面，登录后原路返回
 const goLogin = () => {
   const here = location.pathname.split('/').pop() || 'index.html';
@@ -198,6 +220,36 @@ async function apiFetch(pathname, options = {}) {
   }
   if (!res.ok) throw new Error((data && data.error) || `请求失败（${res.status}）`);
   return data;
+}
+
+/* ---------------- 操作记录（审计留痕） ---------------- */
+
+const auditQueue = [];
+let auditTimer = null;
+
+function flushAudit() {
+  if (!auditQueue.length || !session || !session.token) return;
+  const entries = auditQueue.splice(0, auditQueue.length);
+  apiFetch('/api/logs', {method:'POST', body: JSON.stringify({entries})}).catch(() => {});
+}
+
+/** 记录一次业务操作；连续操作合并提交，避免刷屏式请求 */
+function audit(action, target, detail = '') {
+  if (!session || !session.token) return;
+  auditQueue.push({action, target, detail});
+  if (auditQueue.length >= 20) { clearTimeout(auditTimer); flushAudit(); return; }
+  clearTimeout(auditTimer);
+  auditTimer = setTimeout(flushAudit, 700);
+}
+
+/** 查看类留痕：同一对象 5 分钟内只记一条，避免反复点击刷记录 */
+const viewLogAt = new Map();
+function logView(target, detail = '') {
+  if (!canViewLogs()) return;
+  const now = Date.now();
+  if (viewLogAt.get(target) && now - viewLogAt.get(target) < 5 * 60 * 1000) return;
+  viewLogAt.set(target, now);
+  audit('view', target, detail);
 }
 
 const normalizeDb = data => {
@@ -235,6 +287,7 @@ const isDbEmpty = () => ['clients','products','projects','tasks','movements','in
 const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 450); };
 
 async function persistNow() {
+  if (!canEdit()) { syncBadge('只读账号'); return; }
   if (savingPending) { resaveAfter = true; return; }
   savingPending = true;
   try {
@@ -265,21 +318,78 @@ function applyAccountUI() {
   if (!user) return;
   const name = user.displayName || user.username;
   const companyName = (session.company && session.company.name) || '未命名公司';
+  const roleName = ROLE_LABEL[user.role] || '员工';
   window.__companyName = companyName;
-  const avatar = $('.profile .avatar'); if (avatar) avatar.textContent = name.slice(0,1);
-  const strong = $('.profile strong'); if (strong) strong.textContent = name;
+  window.__roleName = roleName;
+  const avatar = $('.profile .avatar'); if (avatar) avatar.textContent = roleOf() === 'admin' ? '管' : roleOf() === 'manager' ? '店' : name.slice(0,1);
+  const strong = $('.profile strong'); if (strong) strong.textContent = `${name} · ${roleName}`;
   const small = $('.profile small'); if (small) small.textContent = companyName;
-  const sub = $('#mHeaderSub'); if (sub) sub.textContent = companyName;
-  const chip = $('#syncBadge'); if (chip) chip.textContent = '云端已同步';
+  const sub = $('#mHeaderSub'); if (sub) sub.textContent = `${companyName} · ${roleName}`;
+  const chip = $('#syncBadge'); if (chip) chip.textContent = canEdit() ? '云端已同步' : '只读账号';
+  document.body.dataset.role = roleOf();
+  // 员工没有账号管理与修改记录，直接隐藏入口
+  const staffNav = $('.nav-item[data-nav="staff"]'); if (staffNav) staffNav.classList.toggle('hidden', isStaff());
+  const logsNav = $('.nav-item[data-nav="logs"]'); if (logsNav) logsNav.classList.toggle('hidden', !canViewLogs());
+  const mStaffNav = $('.m-bottom-nav [data-mnav="staff"]'); if (mStaffNav) mStaffNav.classList.toggle('hidden', isStaff());
+  // 只读账号隐藏顶栏 / 底栏的新增入口
+  const quickAdd = $('#quickAddBtn'); if (quickAdd) quickAdd.classList.toggle('hidden', !canEdit());
+  const mAdd = $('.m-add-btn'); if (mAdd) mAdd.classList.toggle('hidden', !canEdit());
 }
 
 async function logout() {
+  flushAudit();
   try { await apiFetch('/api/logout', {method:'POST'}); } catch (error) { /* 本地清理即可 */ }
   clearSession();
   location.replace('login.html');
 }
 
-const ui = {page:'dashboard',taskView:'team',inventoryTab:'stock',filters:{},modalDirty:false};
+/** 切换账号：清掉本地会话后回到登录页，可选择企业或员工入口重新登录 */
+async function switchAccount() {
+  flushAudit();
+  try { await apiFetch('/api/logout', {method:'POST'}); } catch (error) { /* ignore */ }
+  clearSession();
+  location.replace('login.html?switch=1');
+}
+
+/** 通用确认弹窗 */
+function openConfirm({title, subtitle = '', text, label = '确认', action, id = '', danger = false, extra = ''}) {
+  openModal({title, subtitle, eyebrow:'PLEASE CONFIRM', body:`
+    <div class="form-body"><p class="confirm-text">${text}</p>${extra}</div>
+    <div class="form-footer"><button class="secondary-btn" data-close="modal">取消</button><button class="primary-btn ${danger?'danger':''}" data-action="${action}" data-id="${id}">${icon(danger?'trash':'check')}${label}</button></div>`});
+}
+
+/** 账号信息面板：查看当前身份、切换账号、退出登录 */
+function openAccountPanel() {
+  const user = (session && session.user) || {};
+  const companyName = (session.company && session.company.name) || '未命名公司';
+  const roleName = ROLE_LABEL[user.role] || '员工';
+  const perms = {
+    admin: ['查看全部业务数据', '新增 / 修改 / 删除业务数据', '管理员工与登录账号', '查看操作记录'],
+    manager: ['查看全部业务数据', '新增 / 修改 / 删除业务数据', '查看操作记录（每次查看与修改都会留痕）', '不含账号管理权限'],
+    staff: ['查看业务数据（只读）', '更新自己负责任务的进度与状态', '不含经营数据与员工档案的修改权限']
+  }[roleOf()] || [];
+  openModal({title:'账号信息', subtitle:'登录状态、角色权限与退出入口', eyebrow:'ACCOUNT CENTER', body:`
+    <div class="account-hero">
+      <span class="account-avatar">${esc((user.displayName || user.username || '—').slice(0,1))}</span>
+      <div><h3>${esc(user.displayName || user.username || '未登录')}</h3><p>${esc(companyName)} · ${esc(roleName)}</p></div>
+      <span class="badge ${roleOf()==='admin'?'green':roleOf()==='manager'?'blue':'gray'}">${esc(roleName)}</span>
+    </div>
+    <div class="detail-meta-grid account-meta">
+      <div><span>登录入口</span><strong>${esc(ROLE_ENTRY[roleOf()] || '员工入口')}</strong></div>
+      <div><span>登录账号</span><strong>${esc(user.username || '—')}</strong></div>
+      <div><span>所属公司</span><strong>${esc(companyName)}</strong></div>
+      <div><span>会话状态</span><strong>已登录</strong></div>
+    </div>
+    <div class="detail-section"><h4>当前角色权限</h4><ul class="perm-list">${perms.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>
+    <div class="form-footer">
+      <button class="secondary-btn" data-close="modal">继续使用</button>
+      <button class="secondary-btn" data-action="switch-account">${icon('swap')}切换账号</button>
+      <button class="primary-btn danger" data-action="logout-confirm">${icon('logout')}退出登录</button>
+    </div>`});
+}
+
+const ui = {page:'dashboard',taskView:'team',inventoryTab:'stock',filters:{},modalDirty:false,
+  logs:[],logsLoading:false,members:[],membersLoaded:false};
 const clientById = id => db.clients.find(x => x.id === id);
 const productById = id => db.products.find(x => x.id === id);
 const projectById = id => db.projects.find(x => x.id === id);
@@ -306,6 +416,17 @@ const staffNames = () => {
 const staffOwnerOptions = () => staffNames();
 const staffByName = name => db.staff.find(s => s.name === name);
 const staffById = id => db.staff.find(s => s.id === id);
+/** 登录账号与员工档案的对应关系 */
+const memberById = id => (ui.members || []).find(m => m.id === id);
+const memberByStaff = staffId => (ui.members || []).find(m => m.staffId === staffId);
+const memberRoleLabel = role => ROLE_LABEL[role] || '员工';
+/** 当前登录员工对应的档案 */
+const currentStaff = () => {
+  const staffId = session && session.user && session.user.staffId;
+  if (staffId && staffById(staffId)) return staffById(staffId);
+  const display = (session && session.user && session.user.displayName) || '';
+  return db.staff.find(s => s.name === display) || null;
+};
 /** 员工改名时，把任务、项目、节点、流水里的负责人一起改掉 */
 const renameOwner = (from, to) => {
   db.tasks.forEach(t => { if (t.owner === from) t.owner = to; });
@@ -327,6 +448,8 @@ const staffWorkload = name => {
 };
 /** 当前登录人对应的员工档案，用于「我的工作」视图 */
 const currentStaffName = () => {
+  const mine = currentStaff();
+  if (mine) return mine.name;
   const display = (session && session.user && (session.user.displayName || session.user.username)) || '';
   const hit = db.staff.find(s => s.name === display);
   if (hit) return hit.name;
@@ -340,7 +463,12 @@ const statusBadge = status => {
 const ownerHtml = name => `<span class="owner"><i class="mini-avatar">${esc(name.slice(0,1))}</i>${esc(name)}</span>`;
 const emptyState = (title='暂无匹配数据',text='试试调整搜索词或筛选条件') => `<div class="empty-state"><span>${icon('search')}</span><strong>${title}</strong><p>${text}</p></div>`;
 const pageHeading = (eyebrow,title,desc,actions='') => `<div class="page-heading"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${desc}</p></div><div class="heading-actions">${actions}</div></div>`;
-const actionButton = (action,id,type='view') => `<button data-action="${action}" data-id="${id}" title="${type==='edit'?'编辑':'查看'}">${icon(type==='edit'?'edit':'eye')}</button>`;
+/** 只读角色（员工）只保留查看按钮，编辑按钮直接不渲染 */
+const actionButton = (action,id,type='view') => (type==='edit' && !canEdit())
+  ? ''
+  : `<button data-action="${action}" data-id="${id}" title="${type==='edit'?'编辑':'查看'}">${icon(type==='edit'?'edit':'eye')}</button>`;
+const readOnlyChip = () => canEdit() ? '' : `<span class="readonly-chip">${icon('eye')}只读账号</span>`;
+const editOnly = html => canEdit() ? html : '';
 const filterBar = (page,placeholder,options='') => {
   const f = ui.filters[page] || {};
   return `<div class="filter-bar"><label class="filter-search">${icon('search')}<input data-filter-search="${page}" value="${esc(f.search||'')}" placeholder="${placeholder}"></label>${options}<span class="filter-count" id="filterCount"></span></div>`;
@@ -400,7 +528,7 @@ function renderDashboard() {
   const prevValues = [27,36,40,49,52,61];
   const monthLabels = Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);return `${d.getMonth()+1}月`;});
   const focus = getReminders().filter(r=>(r.kind==='project'&&projectIds.includes(r.id))||(r.kind==='task'&&pendingTasks.some(t=>t.id===r.id))).slice(0,4);
-  const welcome = isDbEmpty() ? `<section class="welcome-panel"><div><span class="eyebrow">GET STARTED</span><h2>这家公司还没有业务数据</h2><p>先到「客户管理」建一条客户，再新建项目；也可以载入一套示例数据，熟悉流程后再清空重录。</p></div><div class="welcome-actions"><button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button><button class="secondary-btn" data-action="load-demo">${icon('spark')}载入示例数据</button></div></section>` : '';
+  const welcome = (isDbEmpty() && canEdit()) ? `<section class="welcome-panel"><div><span class="eyebrow">GET STARTED</span><h2>这家公司还没有业务数据</h2><p>先到「客户管理」建一条客户，再新建项目；也可以载入一套示例数据，熟悉流程后再清空重录。</p></div><div class="welcome-actions"><button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button><button class="secondary-btn" data-action="load-demo">${icon('spark')}载入示例数据</button></div></section>` : '';
   return `${pageHeading('WORKSPACE OVERVIEW','把每一个好创意，稳稳落地。','项目、产品、协作与经营数据，今天也一目了然。',`<span class="date-chip">数据更新于刚刚</span><button class="secondary-btn" data-action="export" data-type="dashboard">${icon('download')}导出经营简报</button>`)}
   ${welcome}
   ${filterBar('dashboard','快速查询项目、编号或客户…',selectFilter('dashboard','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('dashboard','product',db.products.map(p=>[p.id,p.name]),f.product)+selectFilter('dashboard','time',[['7','近 7 天交付'],['30','近 30 天交付'],['90','近 90 天交付']],f.time)+selectFilter('dashboard','manager',staffOwnerOptions(),f.manager))}
@@ -428,7 +556,7 @@ function renderClients() {
   const f = ui.filters.clients || {};
   const rows = db.clients.filter(c => (!f.search || `${c.name}${c.company}${c.phone}${c.needs}`.toLowerCase().includes(f.search.toLowerCase())) && (!f.status || (f.status==='授信客户'?c.credit:!c.credit)) && (!f.client || c.id===f.client));
   const invoiced = db.invoices.filter(i=>i.status==='已开票').reduce((s,i)=>s+i.amount,0);
-  return `${pageHeading('CLIENT RELATIONSHIP','客户管理','沉淀客户需求、项目合作与账款信用的完整档案。',`<button class="secondary-btn" data-action="export" data-type="clients">${icon('download')}导出</button><button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button>`)}
+  return `${pageHeading('CLIENT RELATIONSHIP','客户管理','沉淀客户需求、项目合作与账款信用的完整档案。',`<button class="secondary-btn" data-action="export" data-type="clients">${icon('download')}导出</button>${canEdit()?`<button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button>`:readOnlyChip()}`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>合作客户</span><i class="stat-icon">${icon('users')}</i></div><div class="stat-value">${db.clients.length}<small>家</small></div><div class="stat-foot">${db.clients.filter(c=>c.credit).length} 家授信客户</div></div><div class="stat-card"><div class="stat-top"><span>客户预算总额</span><i class="stat-icon blue">${icon('trend')}</i></div><div class="stat-value">${money(db.clients.reduce((s,c)=>s+c.budget,0),true)}</div><div class="stat-foot">覆盖 ${db.projects.length} 个开发项目</div></div><div class="stat-card"><div class="stat-top"><span>累计已开票</span><i class="stat-icon orange">${icon('receipt')}</i></div><div class="stat-value">${money(invoiced,true)}</div><div class="stat-foot">${db.invoices.filter(i=>i.status==='待开票').length} 笔待开票</div></div><div class="stat-card"><div class="stat-top"><span>剩余授信额度</span><i class="stat-icon red">${icon('credit')}</i></div><div class="stat-value">${money(db.clients.reduce((s,c)=>s+c.creditLimit-c.creditUsed,0),true)}</div><div class="stat-foot">额度使用实时可见</div></div></section>
   ${filterBar('clients','搜索客户姓名、单位、联系方式或需求…',selectFilter('clients','status',['授信客户','非授信客户'],f.status))}
   <section class="table-card"><div class="table-wrap"><table><thead><tr><th>客户 / 单位</th><th>联系方式</th><th>开发需求</th><th>费用预算</th><th>付款方式</th><th>授信 / 剩余额度</th><th>开票状态</th><th>关联项目</th><th>操作</th></tr></thead><tbody>${rows.map(c=>{const ps=db.projects.filter(p=>p.clientId===c.id);const pending=db.invoices.some(i=>i.clientId===c.id&&i.status==='待开票');return `<tr><td><span class="cell-main">${esc(c.company)}</span><span class="cell-sub">${esc(c.name)} · ${esc(c.contact)}</span></td><td>${esc(c.phone)}</td><td><span title="${esc(c.needs)}" style="display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis">${esc(c.needs)}</span></td><td><span class="cell-main">${money(c.budget)}</span></td><td>${esc(c.payment)}</td><td>${c.credit?`<span class="cell-main">${money(c.creditLimit-c.creditUsed)}</span><span class="cell-sub">总额 ${money(c.creditLimit)}</span>`:'<span class="badge gray no-dot">未授信</span>'}</td><td>${statusBadge(pending?'待开票':'已开票')}</td><td><button class="card-link" data-action="view-client" data-id="${c.id}">${ps.length} 个项目 ${icon('chevron')}</button></td><td><div class="table-actions">${actionButton('view-client',c.id)}${actionButton('edit-client',c.id,'edit')}</div></td></tr>`}).join('')}</tbody></table></div>${!rows.length?emptyState():''}</section>`;
@@ -440,16 +568,16 @@ function renderProducts() {
   const rows = db.products.filter(p=>(!f.search||`${p.name}${p.code}${p.material}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.type||p.type===f.type));
   const stockValue = db.products.reduce((s,p)=>s+stockOf(p.id)*productCost(p),0);
   const avgMargin = db.products.reduce((s,p)=>s+productMargin(p),0)/db.products.length;
-  return `${pageHeading('PRODUCT LIBRARY','产品信息管理','从成本测算到零售定价，让每一款产品的经营价值清晰可见。',`<button class="secondary-btn" data-action="export" data-type="products">${icon('download')}导出</button><button class="primary-btn" data-action="add-product">${icon('plus')}新增产品</button>`)}
+  return `${pageHeading('PRODUCT LIBRARY','产品信息管理','从成本测算到零售定价，让每一款产品的经营价值清晰可见。',`<button class="secondary-btn" data-action="export" data-type="products">${icon('download')}导出</button>${canEdit()?`<button class="primary-btn" data-action="add-product">${icon('plus')}新增产品</button>`:readOnlyChip()}`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>产品档案</span><i class="stat-icon">${icon('box')}</i></div><div class="stat-value">${db.products.length}<small>款</small></div><div class="stat-foot">${types.length} 个产品类型</div></div><div class="stat-card"><div class="stat-top"><span>库存成本价值</span><i class="stat-icon blue">${icon('wallet')}</i></div><div class="stat-value">${money(stockValue,true)}</div><div class="stat-foot">按实时库存 × 单件综合成本</div></div><div class="stat-card"><div class="stat-top"><span>平均零售毛利率</span><i class="stat-icon orange">${icon('trend')}</i></div><div class="stat-value">${avgMargin.toFixed(1)}<small>%</small></div><div class="stat-foot">已计入设计与开模摊销</div></div><div class="stat-card"><div class="stat-top"><span>累计出入库</span><i class="stat-icon red">${icon('layers')}</i></div><div class="stat-value">${db.movements.length}<small>笔</small></div><div class="stat-foot">完整流水可追溯</div></div></section>
   ${filterBar('products','搜索产品名称、编号或材质…',selectFilter('products','type',types,f.type))}
-  <section class="table-card"><div class="table-wrap"><table><thead><tr><th>产品编号 / 名称</th><th>类型 / 材质</th><th>计划数量</th><th>成本构成</th><th>单件综合成本</th><th>零售价 / 毛利率</th><th>进货 / 出货</th><th>实时库存</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const cost=productCost(p),margin=productMargin(p),stock=stockOf(p.id);return `<tr><td><span class="cell-sub" style="margin:0 0 4px;color:var(--green)">${esc(p.code)}</span><span class="cell-main">${esc(p.name)}</span></td><td><span class="cell-main" style="font-weight:500">${esc(p.type)}</span><span class="cell-sub">${esc(p.material)}</span></td><td>${Number(p.quantity).toLocaleString()} 件</td><td><span title="设计费 / 打样费 / 开模费 / 采购单价">${money(p.designFee,true)} / ${money(p.sampleFee,true)} / ${money(p.moldFee,true)} / ${money(p.unitCost)}</span></td><td><span class="cell-main">${money(cost)}</span><span class="cell-sub">总投入 ${money(cost*p.quantity,true)}</span></td><td><span class="cell-main">${money(p.retail)}</span><span class="cell-sub" style="color:var(--green)">毛利 ${margin.toFixed(1)}%</span></td><td><span style="color:var(--green)">+${movementTotal(p.id,'in')}</span> / <span style="color:var(--orange)">-${movementTotal(p.id,'out')}</span></td><td><span class="cell-main" style="color:${stock<=p.minStock?'var(--red)':'var(--ink)'}">${stock} 件</span><span class="cell-sub">安全库存 ${p.minStock}</span></td><td><div class="table-actions">${actionButton('edit-product',p.id,'edit')}<button data-action="add-movement" data-id="${p.id}" title="出入库">${icon('inbound')}</button></div></td></tr>`}).join('')}</tbody></table></div>${!rows.length?emptyState():''}</section>`;
+  <section class="table-card"><div class="table-wrap"><table><thead><tr><th>产品编号 / 名称</th><th>类型 / 材质</th><th>计划数量</th><th>成本构成</th><th>单件综合成本</th><th>零售价 / 毛利率</th><th>进货 / 出货</th><th>实时库存</th><th>操作</th></tr></thead><tbody>${rows.map(p=>{const cost=productCost(p),margin=productMargin(p),stock=stockOf(p.id);return `<tr><td><span class="cell-sub" style="margin:0 0 4px;color:var(--green)">${esc(p.code)}</span><span class="cell-main">${esc(p.name)}</span></td><td><span class="cell-main" style="font-weight:500">${esc(p.type)}</span><span class="cell-sub">${esc(p.material)}</span></td><td>${Number(p.quantity).toLocaleString()} 件</td><td><span title="设计费 / 打样费 / 开模费 / 采购单价">${money(p.designFee,true)} / ${money(p.sampleFee,true)} / ${money(p.moldFee,true)} / ${money(p.unitCost)}</span></td><td><span class="cell-main">${money(cost)}</span><span class="cell-sub">总投入 ${money(cost*p.quantity,true)}</span></td><td><span class="cell-main">${money(p.retail)}</span><span class="cell-sub" style="color:var(--green)">毛利 ${margin.toFixed(1)}%</span></td><td><span style="color:var(--green)">+${movementTotal(p.id,'in')}</span> / <span style="color:var(--orange)">-${movementTotal(p.id,'out')}</span></td><td><span class="cell-main" style="color:${stock<=p.minStock?'var(--red)':'var(--ink)'}">${stock} 件</span><span class="cell-sub">安全库存 ${p.minStock}</span></td><td><div class="table-actions">${actionButton('edit-product',p.id,'edit')}${canEdit()?`<button data-action="add-movement" data-id="${p.id}" title="出入库">${icon('inbound')}</button>`:''}</div></td></tr>`}).join('')}</tbody></table></div>${!rows.length?emptyState():''}</section>`;
 }
 
 function renderProjects() {
   const f = ui.filters.projects || {};
   const rows = db.projects.filter(p=>(!f.search||`${p.name}${p.code}${clientById(p.clientId)?.company}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.status||(f.status==='存在延期'?projectDelayed(p):p.status===f.status))&&(!f.manager||p.manager===f.manager)&&(!f.client||p.clientId===f.client));
-  return `${pageHeading('DEVELOPMENT PIPELINE','开发进度管理','从设计到交付，七个关键阶段清晰可见，风险节点提前介入。',`<button class="secondary-btn" data-action="export" data-type="projects">${icon('download')}导出</button><button class="primary-btn" data-action="add-project">${icon('plus')}新建项目</button>`)}
+  return `${pageHeading('DEVELOPMENT PIPELINE','开发进度管理','从设计到交付，七个关键阶段清晰可见，风险节点提前介入。',`<button class="secondary-btn" data-action="export" data-type="projects">${icon('download')}导出</button>${canEdit()?`<button class="primary-btn" data-action="add-project">${icon('plus')}新建项目</button>`:readOnlyChip()}`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>全部项目</span><i class="stat-icon">${icon('route')}</i></div><div class="stat-value">${db.projects.length}<small>个</small></div><div class="stat-foot">${db.projects.filter(p=>p.status==='已完成').length} 个已完成交付</div></div><div class="stat-card"><div class="stat-top"><span>按计划推进</span><i class="stat-icon blue">${icon('checkCircle')}</i></div><div class="stat-value">${db.projects.filter(p=>p.status!=='已完成'&&!projectDelayed(p)).length}<small>个</small></div><div class="stat-foot">关键节点运行正常</div></div><div class="stat-card"><div class="stat-top"><span>存在延期</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.projects.filter(projectDelayed).length}<small>个</small></div><div class="stat-foot">请优先协调相关资源</div></div><div class="stat-card"><div class="stat-top"><span>30 天内交付</span><i class="stat-icon orange">${icon('calendar')}</i></div><div class="stat-value">${db.projects.filter(p=>p.status!=='已完成'&&daysFromToday(p.deadline)<=30).length}<small>个</small></div><div class="stat-foot">做好生产与物流衔接</div></div></section>
   ${filterBar('projects','搜索项目名称、编号或客户…',selectFilter('projects','status',['进行中','存在延期','已完成'],f.status)+selectFilter('projects','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('projects','manager',staffOwnerOptions(),f.manager))}
   <section class="project-grid">${rows.map(p=>`<article class="project-card" data-action="view-project" data-id="${p.id}"><div class="project-card-top"><span class="project-card-code">${esc(p.code)}</span>${statusBadge(projectStatus(p))}</div><h3>${esc(p.name)}</h3><span class="project-client">${icon('building')}${esc(clientById(p.clientId)?.company)}</span><div class="project-stage-preview">${p.stages.map(s=>{const delayed=s.status!=='已完成'&&daysFromToday(s.plan)<0;const cls=s.status==='已完成'?'done':delayed?'delay':s.status==='进行中'?'current':'';return `<div class="stage-dot ${cls}" title="${esc(s.name)} · 计划 ${s.plan}"><i></i><span>${esc(s.name.replace('确认','').replace('优化','').replace('最终',''))}</span></div>`}).join('')}</div><div class="project-progress-line"><span>当前：${esc(currentStage(p).name)}</span><strong>${projectProgress(p)}%</strong></div><div class="progress-track"><i class="progress-fill ${projectDelayed(p)?'orange':''}" style="width:${projectProgress(p)}%"></i></div><div class="project-card-bottom"><span>${ownerHtml(p.manager)}</span><span>${icon('calendar')}${dateShort(p.deadline)} 交付</span></div></article>`).join('')}</section>${!rows.length?emptyState():''}`;
@@ -462,7 +590,7 @@ function renderTasks() {
   if(ui.taskView==='personal') rows=rows.filter(t=>t.owner===me);
   const completed=db.tasks.filter(t=>t.status==='已完成').length;
   const columns=['待开始','进行中','已完成'];
-  return `${pageHeading('TEAM COLLABORATION','员工工作管理','任务与项目自动关联，个人节奏和团队负载同样清楚。',`<div class="segment-control"><button data-action="task-view" data-view="team" class="${ui.taskView==='team'?'active':''}">团队视图</button><button data-action="task-view" data-view="personal" class="${ui.taskView==='personal'?'active':''}">我的工作</button></div><button class="primary-btn" data-action="add-task">${icon('plus')}分配任务</button>`)}
+  return `${pageHeading('TEAM COLLABORATION','员工工作管理','任务与项目自动关联，个人节奏和团队负载同样清楚。',`<div class="segment-control"><button data-action="task-view" data-view="team" class="${ui.taskView==='team'?'active':''}">团队视图</button><button data-action="task-view" data-view="personal" class="${ui.taskView==='personal'?'active':''}">我的工作</button></div>${canEdit()?`<button class="primary-btn" data-action="add-task">${icon('plus')}分配任务</button>`:readOnlyChip()}`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>${ui.taskView==='personal'?`${esc(me)}的任务`:'团队任务'}</span><i class="stat-icon">${icon('check')}</i></div><div class="stat-value">${ui.taskView==='personal'?db.tasks.filter(t=>t.owner===me).length:db.tasks.length}<small>项</small></div><div class="stat-foot">完成率 ${Math.round(completed/db.tasks.length*100)}%</div></div><div class="stat-card"><div class="stat-top"><span>正在推进</span><i class="stat-icon blue">${icon('clock')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status==='进行中').length}<small>项</small></div><div class="stat-foot">平均进度 ${Math.round(db.tasks.filter(t=>t.status==='进行中').reduce((s,t)=>s+t.progress,0)/Math.max(1,db.tasks.filter(t=>t.status==='进行中').length))}%</div></div><div class="stat-card"><div class="stat-top"><span>临期 / 已逾期</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status!=='已完成'&&daysFromToday(t.due)<=1).length}<small>项</small></div><div class="stat-foot">今日请优先处理</div></div><div class="stat-card"><div class="stat-top"><span>参与成员</span><i class="stat-icon orange">${icon('users')}</i></div><div class="stat-value">${new Set(db.tasks.map(t=>t.owner)).size}<small>人</small></div><div class="stat-foot">覆盖 ${new Set(db.tasks.map(t=>t.role)).size} 类岗位</div></div></section>
   ${filterBar('tasks','搜索工作内容、负责人或关联项目…',selectFilter('tasks','role',roleOptions,f.role)+selectFilter('tasks','status',columns,f.status)+selectFilter('tasks','manager',staffOwnerOptions(),f.manager))}
   <div class="kanban">${columns.map(col=>{const items=rows.filter(t=>t.status===col);return `<section class="kanban-column ${col==='进行中'?'doing':col==='已完成'?'done':''}"><div class="kanban-header"><strong>${col}</strong><span>${items.length}</span></div>${items.map(t=>{const overdue=t.status!=='已完成'&&daysFromToday(t.due)<0;return `<article class="task-card" data-action="edit-task" data-id="${t.id}"><div class="task-card-top"><span class="role-tag">${esc(t.role)}</span><span class="task-priority">${t.priority==='普通'?'':esc(t.priority)+'优先'}</span></div><h4>${esc(t.title)}</h4><div class="task-project">${icon('route')}${esc(projectById(t.projectId)?.name||'未关联项目')}</div><div class="progress-cell"><div class="progress-track"><i class="progress-fill ${overdue?'orange':''}" style="width:${t.progress}%"></i></div><span>${t.progress}%</span></div><div class="task-card-bottom">${ownerHtml(t.owner)}<span class="task-due ${overdue?'overdue':''}">${icon('calendar')}${overdue?'已逾期':daysFromToday(t.due)===0?'今天截止':dateShort(t.due)}</span></div></article>`}).join('')||'<div class="empty-state" style="padding:30px 10px"><p>暂无任务</p></div>'}</section>`}).join('')}</div>`;
@@ -473,11 +601,11 @@ function renderInventory() {
   const stockRows=db.products.filter(p=>(!f.search||`${p.name}${p.code}${p.type}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.type||p.type===f.type)&&(!f.status||(f.status==='低库存'?stockOf(p.id)<=p.minStock:stockOf(p.id)>p.minStock)));
   const movementRows=db.movements.filter(m=>{const p=productById(m.productId);return (!f.search||`${p?.name}${p?.code}${m.operator}${m.note}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.status||m.type===f.status)}).sort((a,b)=>b.date.localeCompare(a.date));
   const inQty=db.movements.filter(m=>m.type==='in').reduce((s,m)=>s+Number(m.quantity),0),outQty=db.movements.filter(m=>m.type==='out').reduce((s,m)=>s+Number(m.quantity),0);
-  return `${pageHeading('INVENTORY CONTROL','库存管理','库存随流水自动更新，每一次入库与出库都有据可查。',`<button class="secondary-btn" data-action="export" data-type="movements">${icon('download')}导出流水</button><button class="secondary-btn" data-action="add-movement" data-type="out">${icon('outbound')}出库登记</button><button class="primary-btn" data-action="add-movement" data-type="in">${icon('inbound')}入库登记</button>`)}
+  return `${pageHeading('INVENTORY CONTROL','库存管理','库存随流水自动更新，每一次入库与出库都有据可查。',`<button class="secondary-btn" data-action="export" data-type="movements">${icon('download')}导出流水</button>${canEdit()?`<button class="secondary-btn" data-action="add-movement" data-type="out">${icon('outbound')}出库登记</button><button class="primary-btn" data-action="add-movement" data-type="in">${icon('inbound')}入库登记</button>`:readOnlyChip()}`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>实时库存总量</span><i class="stat-icon">${icon('layers')}</i></div><div class="stat-value">${db.products.reduce((s,p)=>s+stockOf(p.id),0).toLocaleString()}<small>件</small></div><div class="stat-foot">${db.products.length} 款在售产品</div></div><div class="stat-card"><div class="stat-top"><span>累计入库</span><i class="stat-icon blue">${icon('inbound')}</i></div><div class="stat-value">+${inQty.toLocaleString()}<small>件</small></div><div class="stat-foot">${db.movements.filter(m=>m.type==='in').length} 笔入库流水</div></div><div class="stat-card"><div class="stat-top"><span>累计出库</span><i class="stat-icon orange">${icon('outbound')}</i></div><div class="stat-value">-${outQty.toLocaleString()}<small>件</small></div><div class="stat-foot">${db.movements.filter(m=>m.type==='out').length} 笔出库流水</div></div><div class="stat-card"><div class="stat-top"><span>低库存预警</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.products.filter(p=>stockOf(p.id)<=p.minStock).length}<small>款</small></div><div class="stat-foot">低于产品安全库存线</div></div></section>
   ${filterBar('inventory',ui.inventoryTab==='stock'?'搜索产品编号、名称或类型…':'搜索产品、经办人或备注…',ui.inventoryTab==='stock'?selectFilter('inventory','status',['充足','低库存'],f.status):selectFilter('inventory','status',[['in','入库'],['out','出库']],f.status))}
   <div class="inventory-tabs"><button data-action="inventory-tab" data-tab="stock" class="${ui.inventoryTab==='stock'?'active':''}">库存总览</button><button data-action="inventory-tab" data-tab="movements" class="${ui.inventoryTab==='movements'?'active':''}">出入库流水（${db.movements.length}）</button></div>
-  <section class="table-card" style="border-radius:0 0 13px 13px">${ui.inventoryTab==='stock'?`<div class="table-wrap"><table><thead><tr><th>产品编号 / 名称</th><th>类型</th><th>零售价</th><th>综合成本价</th><th>折扣率</th><th>实时库存</th><th>安全库存</th><th>库存状态</th><th>快捷操作</th></tr></thead><tbody>${stockRows.map(p=>{const stock=stockOf(p.id),low=stock<=p.minStock;return `<tr><td><span class="cell-sub" style="margin:0 0 4px;color:var(--green)">${esc(p.code)}</span><span class="cell-main">${esc(p.name)}</span></td><td>${esc(p.type)}</td><td>${money(p.retail)}</td><td>${money(productCost(p))}</td><td>${Math.round(p.discount*100)}%</td><td><div class="stock-hero ${low?'low':''}"><strong>${stock}</strong><div class="stock-meter"><i style="width:${clamp(stock/(p.minStock*3)*100,3,100)}%"></i></div></div></td><td>${p.minStock} 件</td><td>${statusBadge(low?'低库存':'充足')}</td><td><div class="table-actions"><button data-action="add-movement" data-id="${p.id}" data-type="in" title="入库">${icon('inbound')}</button><button data-action="add-movement" data-id="${p.id}" data-type="out" title="出库">${icon('outbound')}</button></div></td></tr>`}).join('')}</tbody></table></div>${!stockRows.length?emptyState():''}`:`<div class="table-wrap"><table><thead><tr><th>流水类型</th><th>产品编号 / 名称</th><th>数量</th><th>发生时间</th><th>经办人</th><th>关联项目</th><th>备注</th><th>流水号</th></tr></thead><tbody>${movementRows.map(m=>{const p=productById(m.productId);return `<tr><td><span class="movement-type ${m.type}">${icon(m.type==='in'?'inbound':'outbound')}${m.type==='in'?'入库':'出库'}</span></td><td><span class="cell-main">${esc(p?.name)}</span><span class="cell-sub">${esc(p?.code)}</span></td><td><span class="movement-qty">${m.type==='in'?'+':'-'}${m.quantity}</span></td><td>${esc(m.date)}</td><td>${ownerHtml(m.operator)}</td><td>${esc(projectById(m.projectId)?.name||'—')}</td><td>${esc(m.note||'—')}</td><td><span class="cell-sub" style="margin:0">${esc(m.id.toUpperCase())}</span></td></tr>`}).join('')}</tbody></table></div>${!movementRows.length?emptyState():''}`}</section>`;
+  <section class="table-card" style="border-radius:0 0 13px 13px">${ui.inventoryTab==='stock'?`<div class="table-wrap"><table><thead><tr><th>产品编号 / 名称</th><th>类型</th><th>零售价</th><th>综合成本价</th><th>折扣率</th><th>实时库存</th><th>安全库存</th><th>库存状态</th><th>快捷操作</th></tr></thead><tbody>${stockRows.map(p=>{const stock=stockOf(p.id),low=stock<=p.minStock;return `<tr><td><span class="cell-sub" style="margin:0 0 4px;color:var(--green)">${esc(p.code)}</span><span class="cell-main">${esc(p.name)}</span></td><td>${esc(p.type)}</td><td>${money(p.retail)}</td><td>${money(productCost(p))}</td><td>${Math.round(p.discount*100)}%</td><td><div class="stock-hero ${low?'low':''}"><strong>${stock}</strong><div class="stock-meter"><i style="width:${clamp(stock/(p.minStock*3)*100,3,100)}%"></i></div></div></td><td>${p.minStock} 件</td><td>${statusBadge(low?'低库存':'充足')}</td><td><div class="table-actions">${canEdit()?`<button data-action="add-movement" data-id="${p.id}" data-type="in" title="入库">${icon('inbound')}</button><button data-action="add-movement" data-id="${p.id}" data-type="out" title="出库">${icon('outbound')}</button>`:'<span class="cell-sub" style="margin:0">只读</span>'}</div></td></tr>`}).join('')}</tbody></table></div>${!stockRows.length?emptyState():''}`:`<div class="table-wrap"><table><thead><tr><th>流水类型</th><th>产品编号 / 名称</th><th>数量</th><th>发生时间</th><th>经办人</th><th>关联项目</th><th>备注</th><th>流水号</th></tr></thead><tbody>${movementRows.map(m=>{const p=productById(m.productId);return `<tr><td><span class="movement-type ${m.type}">${icon(m.type==='in'?'inbound':'outbound')}${m.type==='in'?'入库':'出库'}</span></td><td><span class="cell-main">${esc(p?.name)}</span><span class="cell-sub">${esc(p?.code)}</span></td><td><span class="movement-qty">${m.type==='in'?'+':'-'}${m.quantity}</span></td><td>${esc(m.date)}</td><td>${ownerHtml(m.operator)}</td><td>${esc(projectById(m.projectId)?.name||'—')}</td><td>${esc(m.note||'—')}</td><td><span class="cell-sub" style="margin:0">${esc(m.id.toUpperCase())}</span></td></tr>`}).join('')}</tbody></table></div>${!movementRows.length?emptyState():''}`}</section>`;
 }
 
 function renderStaff() {
@@ -497,6 +625,23 @@ function renderStaff() {
   const cards = rows.map(s => {
     const w = staffWorkload(s.name);
     const off = s.status === '停用';
+    const member = memberByStaff(s.id);
+    // 登录账号只由企业管理员维护，店长/员工看不到账号区块
+    const accountBlock = !canManageAccounts() ? '' : member
+      ? `<div class="staff-account ${member.status === 'disabled' ? 'off' : ''}">
+          <span class="account-dot"></span>
+          <div><strong>${esc(member.username)}</strong><small>${esc(memberRoleLabel(member.role))} · ${member.status === 'disabled' ? '已停用' : '可登录'}</small></div>
+          ${canManageAccounts() ? `<div class="staff-account-actions">
+            <button class="ghost-btn" data-action="reset-member" data-id="${member.id}">重置密码</button>
+            <button class="ghost-btn" data-action="toggle-member" data-id="${member.id}">${member.status === 'disabled' ? '启用' : '停用'}</button>
+            <button class="ghost-btn danger" data-action="remove-member" data-id="${member.id}">删除账号</button>
+          </div>` : ''}
+        </div>`
+      : `<div class="staff-account empty">
+          <span class="account-dot"></span>
+          <div><strong>未开通登录账号</strong><small>${canManageAccounts() ? '开通后可使用「员工登录」入口' : '请联系企业管理员开通'}</small></div>
+          ${canManageAccounts() ? `<button class="ghost-btn" data-action="add-member" data-id="${s.id}">${icon('key')}开通账号</button>` : ''}
+        </div>`;
     return `<article class="staff-card ${off ? 'inactive' : ''}">
       <div class="staff-card-top">
         <span class="staff-avatar">${esc(s.name.slice(0, 1))}</span>
@@ -511,25 +656,94 @@ function renderStaff() {
         <div><strong>${w.stages.length}</strong><span>项目节点</span></div>
         <div><strong>${w.managed.length}</strong><span>在管项目</span></div>
       </div>
+      ${accountBlock}
       <div class="staff-actions">
-        <button class="secondary-btn small" data-action="handover-staff" data-id="${s.id}">${icon('shuffle')}交接工作</button>
+        ${canEdit() ? `<button class="secondary-btn small" data-action="handover-staff" data-id="${s.id}">${icon('shuffle')}交接工作</button>
         <button class="secondary-btn small" data-action="edit-staff" data-id="${s.id}">${icon('edit')}编辑</button>
         <button class="ghost-btn" data-action="toggle-staff" data-id="${s.id}">${off ? '恢复在职' : '停用'}</button>
-        <button class="ghost-btn danger" data-action="remove-staff" data-id="${s.id}">删除</button>
+        <button class="ghost-btn danger" data-action="remove-staff" data-id="${s.id}">删除</button>` : `<span class="form-hint">当前为只读账号，无法修改员工档案</span>`}
       </div>
     </article>`;
   }).join('');
   const logs = db.handovers.slice(0, 6).map(h => `<div class="handover-row"><span class="handover-flow">${esc(h.from)} <i>→</i> ${esc(h.to)}</span><span class="handover-detail">${h.tasks || 0} 项任务 · ${h.stages || 0} 个项目节点${h.removed ? ' · 已同步删除原员工' : ''}</span><span class="handover-date">${esc(h.date)}</span></div>`).join('');
-  return `${pageHeading('TEAM ROSTER','员工管理','维护员工档案，任务与项目节点在这里分配，也能一键交接给同事。',`<button class="secondary-btn" data-action="export" data-type="staff">${icon('download')}导出员工</button><button class="primary-btn" data-action="add-staff">${icon('plus')}新增员工</button>`)}
-  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>在职员工</span><i class="stat-icon">${icon('users')}</i></div><div class="stat-value">${active.length}<small>人</small></div><div class="stat-foot">共 ${db.staff.length} 份员工档案</div></div><div class="stat-card"><div class="stat-top"><span>待办任务</span><i class="stat-icon blue">${icon('check')}</i></div><div class="stat-value">${pendingTasks.length}<small>项</small></div><div class="stat-foot">人均 ${avgLoad} 项</div></div><div class="stat-card"><div class="stat-top"><span>逾期任务</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${overdue}<small>项</small></div><div class="stat-foot">建议优先交接或调整排期</div></div><div class="stat-card"><div class="stat-top"><span>岗位覆盖</span><i class="stat-icon orange">${icon('layers')}</i></div><div class="stat-value">${new Set(active.map(s => s.role).filter(Boolean)).size}<small>类</small></div><div class="stat-foot">商务 · 设计 · 新媒体 · 库管 · 生产</div></div></section>
+  const accountCount = (ui.members || []).filter(m => m.role !== 'admin').length;
+  return `${pageHeading('TEAM ROSTER','员工管理','维护员工档案，任务与项目节点在这里分配，也能一键交接给同事。',`${canEdit()?`<button class="secondary-btn" data-action="export" data-type="staff">${icon('download')}导出员工</button><button class="primary-btn" data-action="add-staff">${icon('plus')}新增员工</button>`:readOnlyChip()}`)}
+  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>在职员工</span><i class="stat-icon">${icon('users')}</i></div><div class="stat-value">${active.length}<small>人</small></div><div class="stat-foot">共 ${db.staff.length} 份员工档案</div></div><div class="stat-card"><div class="stat-top"><span>待办任务</span><i class="stat-icon blue">${icon('check')}</i></div><div class="stat-value">${pendingTasks.length}<small>项</small></div><div class="stat-foot">人均 ${avgLoad} 项</div></div><div class="stat-card"><div class="stat-top"><span>逾期任务</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${overdue}<small>项</small></div><div class="stat-foot">建议优先交接或调整排期</div></div><div class="stat-card"><div class="stat-top"><span>已开通登录账号</span><i class="stat-icon orange">${icon('key')}</i></div><div class="stat-value">${accountCount}<small>个</small></div><div class="stat-foot">${(ui.members||[]).filter(m=>m.role==='manager').length} 位店长 · ${(ui.members||[]).filter(m=>m.role==='staff').length} 位员工</div></div></section>
   ${filterBar('staff','搜索姓名、岗位或联系方式…',selectFilter('staff','role',[...new Set(db.staff.map(s => s.role).filter(Boolean))],f.role)+selectFilter('staff','status',['在职','停用'],f.status))}
   <section class="staff-grid">${cards || emptyState('暂无员工档案','点右上角「新增员工」建立第一位同事')}</section>
   <section class="card"><div class="card-header"><div class="card-title"><h3>交接记录</h3><p>最近 6 条工作移交记录，便于追溯</p></div></div><div class="card-body">${logs || '<p class="form-hint">还没有交接记录。员工离职或换岗时，用「交接工作」把任务与节点转给同事。</p>'}</div></section>`;
 }
 
+/* ---------------- 修改记录（操作留痕） ---------------- */
+
+const logTime = value => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+function renderLogs() {
+  const f = ui.filters.logs || {};
+  const all = ui.logs || [];
+  const rows = all.filter(item => {
+    const text = `${item.actor || ''}${item.target || ''}${item.detail || ''}`.toLowerCase();
+    if (f.search && !text.includes(f.search.toLowerCase())) return false;
+    if (f.action && item.action !== f.action) return false;
+    if (f.role && item.role !== f.role) return false;
+    return true;
+  });
+  const todayKey = iso();
+  const today = all.filter(item => String(item.at || '').slice(0, 10) === todayKey).length;
+  const edits = all.filter(item => ['create','update','delete','account'].includes(item.action)).length;
+  const views = all.filter(item => item.action === 'view').length;
+  const staffWrite = all.filter(item => item.role === 'manager').length;
+  const body = rows.map(item => `<tr>
+      <td><span class="cell-main">${esc(logTime(item.at))}</span></td>
+      <td>${ownerHtml(item.actor || '—')}</td>
+      <td><span class="badge ${item.role==='admin'?'green':item.role==='manager'?'blue':'gray'}">${esc(ROLE_LABEL[item.role] || '员工')}</span></td>
+      <td><span class="log-action ${item.action}">${esc(ACTION_LABEL[item.action] || item.action)}</span></td>
+      <td><span class="cell-main">${esc(item.target || '—')}</span></td>
+      <td><span class="cell-sub" style="margin:0">${esc(item.detail || '—')}</span></td>
+    </tr>`).join('');
+  return `${pageHeading('AUDIT TRAIL','修改记录','店长的每一次查看与修改都会自动留痕，谁在什么时候改了什么一目了然。',`<button class="secondary-btn" data-action="reload-logs">${icon('history')}刷新记录</button><button class="secondary-btn" data-action="export" data-type="logs">${icon('download')}导出记录</button>`)}
+  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>今日记录</span><i class="stat-icon">${icon('history')}</i></div><div class="stat-value">${today}<small>条</small></div><div class="stat-foot">累计 ${all.length} 条操作记录</div></div><div class="stat-card"><div class="stat-top"><span>查看留痕</span><i class="stat-icon blue">${icon('eye')}</i></div><div class="stat-value">${views}<small>条</small></div><div class="stat-foot">页面与详情查看记录</div></div><div class="stat-card"><div class="stat-top"><span>内容修改</span><i class="stat-icon orange">${icon('edit')}</i></div><div class="stat-value">${edits}<small>条</small></div><div class="stat-foot">新增 / 修改 / 删除 / 账号</div></div><div class="stat-card"><div class="stat-top"><span>店长操作</span><i class="stat-icon red">${icon('shield')}</i></div><div class="stat-value">${staffWrite}<small>条</small></div><div class="stat-foot">店长查看与编辑全部留痕</div></div></section>
+  ${filterBar('logs','搜索操作人、对象或说明…',selectFilter('logs','action',[['view','查看'],['create','新增'],['update','修改'],['delete','删除'],['account','账号操作'],['login','登录'],['logout','退出']],f.action)+selectFilter('logs','role',[['admin','企业管理员'],['manager','店长'],['staff','员工']],f.role))}
+  <section class="table-card"><div class="table-wrap"><table><thead><tr><th style="width:110px">时间</th><th>操作人</th><th>角色</th><th>动作</th><th>对象</th><th>说明</th></tr></thead><tbody>${body}</tbody></table></div>${rows.length?'':emptyState('暂无操作记录','店长登录并操作后，这里会自动生成记录')}</section>`;
+}
+
+async function loadLogs() {
+  if (!canViewLogs()) return;
+  const f = ui.filters.logs || {};
+  const query = new URLSearchParams({limit:'300'});
+  if (f.action) query.set('action', f.action);
+  if (f.search) query.set('keyword', f.search);
+  ui.logsLoading = true;
+  try {
+    const data = await apiFetch(`/api/logs?${query.toString()}`);
+    ui.logs = Array.isArray(data.logs) ? data.logs : [];
+  } catch (error) {
+    if (error.message.indexOf('登录状态') === -1) toast(`读取操作记录失败：${error.message}`, true);
+  } finally {
+    ui.logsLoading = false;
+  }
+}
+
+async function loadMembers() {
+  if (!canManageAccounts()) { ui.members = []; ui.membersLoaded = true; return; }
+  try {
+    const data = await apiFetch('/api/members');
+    ui.members = Array.isArray(data.members) ? data.members : [];
+  } catch (error) {
+    ui.members = [];
+  } finally {
+    ui.membersLoaded = true;
+  }
+}
+
 function render() {
   updateShell();
-  const pages={dashboard:renderDashboard,clients:renderClients,products:renderProducts,projects:renderProjects,tasks:renderTasks,inventory:renderInventory,staff:renderStaff};
+  const pages={dashboard:renderDashboard,clients:renderClients,products:renderProducts,projects:renderProjects,tasks:renderTasks,inventory:renderInventory,staff:renderStaff,logs:renderLogs};
   $('#pageContent').innerHTML=(pages[ui.page]||renderDashboard)();
   const count=$$('.table-card tbody tr').length + $$('.project-card').length + $$('.task-card').length + $$('.staff-card').length;
   if($('#filterCount')) $('#filterCount').textContent=`共 ${count} 条记录`;
@@ -538,9 +752,11 @@ function render() {
 
 function navigate(page) {
   ui.page=page;
+  if(page==='logs'){ loadLogs().then(()=>{ if(ui.page==='logs') render(); }); }
   render();
   $('#sidebar').classList.remove('show');
   $('#mobileMask').classList.remove('show');
+  if(page!=='logs') logView(`页面 · ${PAGE_LABEL[page]||page}`, '进入页面查看');
 }
 
 function toast(message,error=false) {
@@ -583,6 +799,7 @@ function openClientForm(id) {
 
 function openClientDetail(id) {
   const c=clientById(id);if(!c)return;
+  logView(`客户详情 · ${c.company}`, '查看客户档案与账款信息');
   const projects=db.projects.filter(p=>p.clientId===id);
   const productIds=[...new Set(projects.flatMap(p=>p.productIds))];
   const invoices=db.invoices.filter(i=>i.clientId===id);
@@ -591,8 +808,8 @@ function openClientDetail(id) {
     <div class="detail-section" style="margin-top:20px"><h4>产品开发需求</h4><p style="font-size:11px;line-height:1.8;color:var(--muted);margin:0">${esc(c.needs)}</p></div>
     <div class="detail-section"><h4>关联项目（${projects.length}）</h4>${projects.length?projects.map(p=>`<button class="search-result" data-action="view-project" data-id="${p.id}"><span>${icon('route')}</span><div><strong>${esc(p.name)}</strong><small>${p.code} · ${projectProgress(p)}% · ${money(p.amount)}</small></div></button>`).join(''):'<p class="form-hint">尚未关联项目</p>'}</div>
     <div class="detail-section"><h4>关联产品（${productIds.length}）</h4><div class="detail-list">${productIds.map(pid=>`<div><span>${esc(productById(pid)?.code)}</span><strong>${esc(productById(pid)?.name)}</strong></div>`).join('')||'尚未关联产品'}</div></div>
-    <div class="detail-section"><h4>开票记录（${invoices.length}）</h4>${invoices.length?invoices.map(i=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div><strong style="font-size:11px">${money(i.amount)}</strong><span class="cell-sub">${esc(i.number||'尚未生成发票号')} · ${esc(i.date||'待处理')}</span></div>${statusBadge(i.status)}</div>`).join(''):'<p class="form-hint">暂无开票记录</p>'}<button class="secondary-btn" style="margin-top:12px" data-action="add-invoice" data-id="${c.id}">${icon('plus')}新增开票记录</button></div>
-    <div class="form-footer"><button class="secondary-btn" data-close="modal">关闭</button><button class="primary-btn" data-action="edit-client" data-id="${c.id}">${icon('edit')}编辑客户</button></div>`});
+    <div class="detail-section"><h4>开票记录（${invoices.length}）</h4>${invoices.length?invoices.map(i=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)"><div><strong style="font-size:11px">${money(i.amount)}</strong><span class="cell-sub">${esc(i.number||'尚未生成发票号')} · ${esc(i.date||'待处理')}</span></div>${statusBadge(i.status)}</div>`).join(''):'<p class="form-hint">暂无开票记录</p>'}${canEdit()?`<button class="secondary-btn" style="margin-top:12px" data-action="add-invoice" data-id="${c.id}">${icon('plus')}新增开票记录</button>`:''}</div>
+    <div class="form-footer"><button class="secondary-btn" data-close="modal">关闭</button>${canEdit()?`<button class="primary-btn" data-action="edit-client" data-id="${c.id}">${icon('edit')}编辑客户</button>`:''}</div>`});
 }
 
 function openProductForm(id) {
@@ -620,12 +837,13 @@ function openProjectForm(id) {
 
 function openProjectDetail(id) {
   const p=projectById(id);if(!p)return;
+  logView(`项目详情 · ${p.name}`, '查看项目节点与回款');
   const c=clientById(p.clientId);
   openModal({title:p.name,subtitle:`${p.code} · ${c?.company||''}`,eyebrow:'PROJECT MILESTONES',wide:true,body:`
     <div class="detail-hero"><div class="detail-hero-top"><div><h3>${esc(p.name)}</h3><p>${esc(c?.name)} · ${esc(c?.phone)}</p></div>${statusBadge(projectStatus(p))}</div><div class="detail-meta-grid"><div><span>项目负责人</span><strong>${esc(p.manager)}</strong></div><div><span>计划交付</span><strong>${esc(p.deadline)}</strong></div><div><span>合同金额</span><strong>${money(p.amount)}</strong></div><div><span>已回款 / 待回款</span><strong>${money(p.received)} / ${money(p.amount-p.received)}</strong></div></div><div style="margin-top:18px"><div class="project-progress-line"><span>整体完成度</span><strong>${projectProgress(p)}%</strong></div><div class="progress-track" style="background:rgba(255,255,255,.15)"><i class="progress-fill" style="width:${projectProgress(p)}%;background:#b8d9bd"></i></div></div></div>
     <div class="timeline"><div class="timeline-title"><h4>开发节点</h4><span>点击节点可更新时间与状态</span></div>${p.stages.map((s,i)=>{const delayed=s.status!=='已完成'&&daysFromToday(s.plan)<0;const cls=s.status==='已完成'?'done':delayed?'delay':s.status==='进行中'?'current':'';return `<div class="timeline-item ${cls}"><span class="timeline-marker">${s.status==='已完成'?icon('check'):i+1}</span><div class="timeline-info"><strong>${esc(s.name)}</strong><p>计划 ${s.plan}　·　实际 ${s.actual||'尚未完成'}<br>负责人 ${esc(s.owner)}</p></div><button class="timeline-status ghost-btn" data-action="edit-stage" data-id="${p.id}" data-stage="${i}">${statusBadge(delayed?'延期':s.status)}${icon('edit')}</button></div>`}).join('')}</div>
     <div class="detail-section"><h4>关联产品</h4><div class="detail-list">${p.productIds.map(pid=>{const prod=productById(pid);return `<div><span>${esc(prod?.code)} · 库存 ${stockOf(pid)}</span><strong>${esc(prod?.name)}</strong></div>`}).join('')}</div></div>
-    <div class="form-footer"><button class="secondary-btn" data-action="add-payment" data-id="${p.id}">${icon('wallet')}登记回款</button><button class="secondary-btn" data-action="edit-project" data-id="${p.id}">${icon('edit')}编辑项目</button><button class="primary-btn" data-close="modal">完成</button></div>`});
+    <div class="form-footer">${canEdit()?`<button class="secondary-btn" data-action="add-payment" data-id="${p.id}">${icon('wallet')}登记回款</button><button class="secondary-btn" data-action="edit-project" data-id="${p.id}">${icon('edit')}编辑项目</button>`:''}<button class="primary-btn" data-close="modal">完成</button></div>`});
 }
 
 function openStageForm(projectId,index) {
@@ -693,13 +911,105 @@ function openHandoverForm(id, opts = {}) {
   if (all) all.addEventListener('change', () => { $$('#modalBody input[name="pick"]').forEach(cb => { cb.checked = all.checked; }); });
 }
 
+/* ---------------- 登录账号（店长 / 员工） ---------------- */
+
+function suggestUsername(name) {
+  const table = {林然:'linran',周舟:'zhouzhou',顾清:'guqing',江离:'jiangli',夏禾:'xiahe',宋恺:'songkai',赵库:'zhaoku'};
+  return table[name] || `emp${String(db.staff.length + 1).padStart(3, '0')}`;
+}
+
+function openMemberForm(staffId) {
+  const s = staffById(staffId);
+  if (!s) return;
+  if (!canManageAccounts()) { toast('只有企业管理员可以开通员工账号', true); return; }
+  openModal({
+    title: `开通登录账号 · ${s.name}`,
+    subtitle: '开通后即可在登录页「员工登录」入口使用公司名称 + 账号登录',
+    eyebrow: 'ACCOUNT PROVISION',
+    body: formShell(`
+      ${inputField('员工账号','username',suggestUsername(s.name),{required:true,hint:'2-32 位字母、数字、下划线或点，例如 linran'})}
+      ${selectField('权限角色','role',[['manager','店长 · 可查看并编辑，操作留痕'],['staff','员工 · 只读 + 更新自己任务']],'staff',{required:true})}
+      ${inputField('初始密码','password','',{type:'password',required:true,hint:'至少 6 位，请线下告知本人'})}
+      ${inputField('登录显示名','displayName',s.name,{required:true,hint:'任务负责人、交接对象都按这个姓名匹配'})}
+      <input type="hidden" name="staffId" value="${s.id}">`, '开通账号')
+  });
+}
+
+function openMemberPassword(memberId) {
+  const m = memberById(memberId);
+  if (!m) return;
+  openModal({
+    title: `重置密码 · ${m.displayName || m.username}`,
+    subtitle: `账号 ${m.username} · ${memberRoleLabel(m.role)}`,
+    eyebrow: 'RESET PASSWORD',
+    body: formShell(`
+      ${inputField('新密码','password','',{type:'password',required:true,hint:'至少 6 位，重置后该账号需重新登录'})}
+      <input type="hidden" name="memberId" value="${m.id}">
+      <input type="hidden" name="username" value="${esc(m.username)}">`, '确认重置')
+  });
+}
+
+function openMemberRemove(memberId) {
+  const m = memberById(memberId);
+  if (!m) return;
+  openConfirm({
+    title: '删除登录账号',
+    subtitle: `账号 ${m.username} · ${memberRoleLabel(m.role)}`,
+    text: `确认删除「${esc(m.displayName || m.username)}」的登录账号？删除后该员工无法再登录，员工档案与已分配的工作不受影响。`,
+    label: '确认删除', action: 'confirm-remove-member', id: m.id, danger: true
+  });
+}
+
+async function toggleMember(memberId) {
+  const m = memberById(memberId);
+  if (!m) return;
+  const next = m.status === 'disabled' ? 'active' : 'disabled';
+  try {
+    await apiFetch(`/api/members/${encodeURIComponent(memberId)}`, {
+      method:'PATCH', body: JSON.stringify({status: next, username: m.username})
+    });
+    await loadMembers();
+    render();
+    toast(next === 'disabled' ? `账号 ${m.username} 已停用` : `账号 ${m.username} 已恢复启用`);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function removeMember(memberId) {
+  const m = memberById(memberId);
+  try {
+    await apiFetch(`/api/members/${encodeURIComponent(memberId)}`, {method:'DELETE'});
+    await loadMembers();
+    closeModal(); render();
+    toast(`账号 ${m ? m.username : ''} 已删除`);
+  } catch (error) { toast(error.message, true); }
+}
+
+function renderLogsReload() {
+  if (!canViewLogs()) return;
+  loadLogs().then(() => { if (ui.page === 'logs') render(); toast('操作记录已刷新'); });
+}
+
+function confirmLogout() {
+  const user = (session && session.user) || {};
+  openConfirm({
+    title: '退出登录',
+    subtitle: `${user.displayName || ''} · ${ROLE_LABEL[roleOf()] || ''}`,
+    text: '确认退出当前账号？退出后需要重新输入账号密码才能进入工作台。',
+    label: '退出登录', action: 'confirm-logout', danger: true
+  });
+}
+
 function openStaffRemove(id) {
   const s = staffById(id);
   if (!s) return;
   const w = staffWorkload(s.name);
   if (w.total > 0) { openHandoverForm(id, {removeAfter:true}); return; }
+  const account = memberByStaff(s.id);
+  const accountTip = account
+    ? `<p class="confirm-text" style="margin-top:8px;color:var(--orange)">该员工已开通登录账号「${esc(account.username)}」，删除档案后账号仍可登录，请到账号区块一并停用或删除。</p>`
+    : '';
   openModal({title:'删除员工',subtitle:`${s.name} · ${s.role || '未填岗位'}`,eyebrow:'REMOVE STAFF',body:`
-    <div class="form-body"><p class="confirm-text">确认删除「${esc(s.name)}」的员工档案？该员工当前没有在办工作，删除后不可恢复。</p></div>
+    <div class="form-body"><p class="confirm-text">确认删除「${esc(s.name)}」的员工档案？该员工当前没有在办工作，删除后不可恢复。</p>${accountTip}</div>
     <div class="form-footer"><button class="secondary-btn" data-close="modal">取消</button><button class="primary-btn danger" data-action="confirm-remove-staff" data-id="${s.id}">${icon('trash')}确认删除</button></div>`});
 }
 
@@ -710,7 +1020,20 @@ function removeStaff(id) {
 }
 
 function openTaskForm(id) {
-  const t=db.tasks.find(x=>x.id===id)||{title:'',role:'商务',owner:'林然',due:iso(3),progress:0,status:'待开始',projectId:db.projects[0]?.id,priority:'普通'};
+  const t=db.tasks.find(x=>x.id===id)||{title:'',role:'商务',owner:currentStaffName(),due:iso(3),progress:0,status:'待开始',projectId:db.projects[0]?.id,priority:'普通'};
+  // 员工登录：只能更新自己负责任务的进度与状态
+  if(isStaff()) {
+    if(!id) { toast('员工账号不能新建任务，请联系店长或管理员分配', true); return; }
+    if(t.owner !== currentStaffName()) { toast('只能更新自己负责的任务', true); return; }
+    openModal({title:'更新工作任务 · 我的任务',subtitle:`${t.title} · ${projectById(t.projectId)?.name||'未关联项目'}`,eyebrow:'MY TASK',body:formShell(`
+      <div class="form-group full"><label>任务内容</label><div class="readonly-value">${esc(t.title)}</div></div>
+      <div class="form-group"><label>负责人</label><div class="readonly-value">${esc(t.owner)}</div></div>
+      <div class="form-group"><label>截止时间</label><div class="readonly-value">${esc(t.due)}</div></div>
+      ${selectField('任务状态','status',['待开始','进行中','已完成'],t.status,{required:true})}
+      ${inputField('完成进度（%）','progress',t.progress,{type:'number',min:0,max:100,required:true,hint:'本次修改会记入操作记录'})}
+      <input type="hidden" name="id" value="${t.id}">`,'保存进度')});
+    return;
+  }
   openModal({title:id?'更新工作任务':'分配工作任务',subtitle:'任务将同步到个人视图与关键节点提醒',eyebrow:'TEAM TASK',body:formShell(`
     ${inputField('工作内容','title',t.title,{required:true,full:true})}${selectField('岗位','role',roleOptions,t.role)}${selectField('负责人','owner',staffOwnerOptions(),t.owner)}
     ${selectField('关联项目','projectId',db.projects.map(p=>[p.id,p.name]),t.projectId)}${inputField('截止时间','due',t.due,{type:'date',required:true})}
@@ -745,46 +1068,91 @@ function openPaymentForm(projectId) {
 
 function formObject(form) { return Object.fromEntries(new FormData(form).entries()); }
 function numberFields(obj,fields) { fields.forEach(k=>obj[k]=Number(obj[k])||0);return obj; }
-function handleSubmit(event) {
+async function handleSubmit(event) {
   if(event.target.getAttribute('id')!=='businessForm')return;
   event.preventDefault();
   const data=formObject(event.target);
   const title=$('#modalTitle').textContent;
+
+  // 员工为只读角色，仅允许更新自己负责的任务
+  const staffTaskEdit = isStaff() && (title.includes('工作任务')||title==='分配工作任务');
+  if(!canEdit() && !staffTaskEdit){ toast('当前为只读员工账号，无法修改业务数据', true); return; }
+
+  // 账号类表单走独立接口，不写入业务数据
+  if(title.startsWith('开通登录账号')||title.startsWith('重置密码')) {
+    try {
+      if(title.startsWith('开通登录账号')) {
+        await apiFetch('/api/members',{method:'POST',body:JSON.stringify({
+          username:data.username,password:data.password,role:data.role,
+          displayName:data.displayName,staffId:data.staffId
+        })});
+        await loadMembers();
+        closeModal();render();
+        toast(`账号 ${data.username} 已开通，可用「员工登录」入口进入`);
+      } else {
+        await apiFetch(`/api/members/${encodeURIComponent(data.memberId)}`,{method:'PATCH',body:JSON.stringify({
+          password:data.password,username:data.username
+        })});
+        closeModal();render();
+        toast('密码已重置，该账号需重新登录');
+      }
+    } catch(error){ toast(error.message,true); }
+    return;
+  }
+
   try {
     if(title.includes('客户档案')||title==='新增客户') {
       numberFields(data,['budget','creditLimit','creditUsed']);data.credit=data.credit==='true';
       if(data.creditUsed>data.creditLimit && data.credit) throw new Error('已使用额度不能超过授信额度');
       if(data.id) Object.assign(clientById(data.id),data);else db.clients.push({...data,id:uid('c'),createdAt:iso()});
+      audit(data.id?'update':'create',`客户 · ${data.company||data.name}`,data.id?'修改客户档案':'新增客户档案');
       toast(data.id?'客户档案已更新':'客户已创建');
     } else if(title.includes('产品信息')||title==='新增产品') {
       numberFields(data,['quantity','minStock','designFee','sampleFee','moldFee','unitCost','retail','discount','initialStock']);
       if(db.products.some(p=>p.code===data.code&&p.id!==data.id)) throw new Error('产品编号已存在，请更换');
       if(data.id) Object.assign(productById(data.id),data);else db.products.push({...data,id:uid('p')});
+      audit(data.id?'update':'create',`产品 · ${data.name}`,`零售价 ${money(data.retail)} · 采购单价 ${money(data.unitCost)}`);
       toast(data.id?'产品信息已更新，成本与毛利已重算':'产品已创建');
     } else if(title.includes('开发项目')||title==='新建开发项目'||title==='编辑项目') {
       numberFields(data,['amount','received']);
       if(data.received>data.amount) throw new Error('已回款不能超过项目合同额');
       if(data.id) {const p=projectById(data.id);const oldIds=p.productIds;Object.assign(p,data,{productIds:[data.productId,...oldIds.filter(x=>x!==data.productId)]});delete p.productId;if(data.status==='已完成')p.stages.forEach(s=>{s.status='已完成';s.actual=s.actual||iso()});}
       else {const id=uid('j');db.projects.push({id,code:data.code,name:data.name,clientId:data.clientId,productIds:[data.productId],manager:data.manager,amount:data.amount,received:data.received,deadline:data.deadline,status:data.status,stages:STAGES.map((name,i)=>({name,plan:iso(i*5+3),actual:'',owner:i<4?(i===0?'顾清':'江离'):i<6?'宋恺':'赵库',status:i===0?'进行中':'未开始'}))});}
+      audit(data.id?'update':'create',`项目 · ${data.name}`,`合同额 ${money(data.amount)} · 负责人 ${data.manager}`);
       toast(data.id?'项目信息已更新':'项目已创建，7 个开发节点已生成');
     } else if(title.startsWith('更新节点')) {
       const p=projectById(data.projectId),s=p.stages[Number(data.stageIndex)];Object.assign(s,{owner:data.owner,status:data.status,plan:data.plan,actual:data.actual});
       if(s.status==='已完成'&&!s.actual)s.actual=iso();if(s.status!=='已完成')s.actual='';
       if(p.stages.every(x=>x.status==='已完成'))p.status='已完成';else if(p.status==='已完成')p.status='进行中';
+      audit('update',`项目节点 · ${p.name} / ${s.name}`,`状态「${s.status}」· 负责人 ${s.owner}`);
       toast('项目节点已更新，进度已同步');
       setTimeout(()=>openProjectDetail(p.id),50);
     } else if(title.includes('工作任务')||title==='分配工作任务') {
       numberFields(data,['progress']);data.progress=clamp(data.progress,0,100);if(data.status==='已完成')data.progress=100;
+      if(isStaff()) {
+        await apiFetch(`/api/tasks/${encodeURIComponent(data.id)}`,{method:'PATCH',body:JSON.stringify({status:data.status,progress:data.progress})});
+        db=normalizeDb(await apiFetch('/api/data'));
+        closeModal();render();
+        toast('任务进度已更新，本次修改已记入操作记录');
+        return;
+      }
       if(data.id)Object.assign(db.tasks.find(t=>t.id===data.id),data);else db.tasks.push({...data,id:uid('t')});
+      audit(data.id?'update':'create',`任务 · ${data.title}`,`负责人 ${data.owner} · 进度 ${data.progress}% · ${data.status}`);
       toast(data.id?'任务进度已更新':'任务已分配并通知到个人视图');
     } else if(title==='出入库登记') {
       numberFields(data,['quantity']);if(!Number.isInteger(data.quantity)||data.quantity<=0)throw new Error('出入库数量必须为正整数');
       if(data.type==='out'&&data.quantity>stockOf(data.productId))throw new Error(`出库失败：当前仅剩 ${stockOf(data.productId)} 件，库存不可为负`);
-      db.movements.push({...data,id:uid('m')});toast(`${data.type==='in'?'入库':'出库'}登记成功，实时库存已更新`);
+      db.movements.push({...data,id:uid('m')});
+      audit('create',`库存 · ${productById(data.productId)?.name||''}`,`${data.type==='in'?'入库':'出库'} ${data.quantity} 件`);
+      toast(`${data.type==='in'?'入库':'出库'}登记成功，实时库存已更新`);
     } else if(title==='新增开票记录') {
-      numberFields(data,['amount']);db.invoices.push({...data,id:uid('i')});toast('开票记录已保存');
+      numberFields(data,['amount']);db.invoices.push({...data,id:uid('i')});
+      audit('create','开票 · 新增开票记录',`金额 ${money(data.amount)} · ${data.status}`);
+      toast('开票记录已保存');
     } else if(title==='登记项目回款') {
-      numberFields(data,['amount']);const p=projectById(data.projectId);if(p.received+data.amount>p.amount)throw new Error('累计回款不能超过项目合同额');p.received+=data.amount;db.payments.push({id:uid('pay'),projectId:data.projectId,amount:data.amount,date:data.date,note:data.note});toast('回款已登记，看板数据已更新');
+      numberFields(data,['amount']);const p=projectById(data.projectId);if(p.received+data.amount>p.amount)throw new Error('累计回款不能超过项目合同额');p.received+=data.amount;db.payments.push({id:uid('pay'),projectId:data.projectId,amount:data.amount,date:data.date,note:data.note});
+      audit('create',`回款 · ${p.name}`,`本次回款 ${money(data.amount)}`);
+      toast('回款已登记，看板数据已更新');
       setTimeout(()=>openProjectDetail(p.id),50);
     } else if(title==='新增员工'||title.startsWith('编辑员工')) {
       if(db.staff.some(s=>s.name===data.name&&s.id!==data.id)) throw new Error('已存在同名员工，请用不同姓名区分');
@@ -792,8 +1160,9 @@ function handleSubmit(event) {
         const s=staffById(data.id),oldName=s.name;
         Object.assign(s,data);
         if(oldName!==data.name) renameOwner(oldName,data.name);
+        audit('update',`员工 · ${data.name}`,oldName!==data.name?`改名：${oldName} → ${data.name}`:`岗位 ${data.role}`);
         toast(oldName!==data.name?'员工档案已更新，相关工作负责人已同步改名':'员工档案已更新');
-      } else { db.staff.push({...data,id:uid('s')}); toast('员工已添加，可在任务与开发节点中分配工作'); }
+      } else { db.staff.push({...data,id:uid('s')}); audit('create',`员工 · ${data.name}`,`新增员工档案 · ${data.role}`); toast('员工已添加，可在任务与开发节点中分配工作'); }
     } else if(title.startsWith('交接工作')||title.startsWith('删除员工')) {
       const picks=new FormData(event.target).getAll('pick');
       if(!picks.length) throw new Error('请至少勾选一项要移交的工作');
@@ -809,6 +1178,7 @@ function handleSubmit(event) {
       const removed=data.removeAfter==='1';
       db.handovers.unshift({id:uid('h'),from,to,date:iso(),tasks,stages,managers,note:data.note||'',removed});
       if(removed) db.staff=db.staff.filter(s=>s.id!==data.staffId);
+      audit(removed?'delete':'update',`交接 · ${from} → ${to}`,`${tasks} 项任务、${stages} 个项目节点、${managers} 个在管项目`);
       toast(`已把 ${from} 的 ${tasks} 项任务、${stages} 个项目节点移交给 ${to}${removed?'，并删除原员工档案':''}`);
     }
     save();render();if(!title.startsWith('更新节点')&&title!=='登记项目回款')closeModal();
@@ -831,6 +1201,7 @@ function exportCSV(type) {
   else if(type==='projects'){name='项目开发进度';rows=[['项目编号','项目名称','客户','负责人','合同额','已回款','交付日期','项目状态','整体进度','阶段','计划时间','实际时间','阶段负责人','阶段状态'],...db.projects.flatMap(p=>p.stages.map(s=>[p.code,p.name,clientById(p.clientId)?.company,p.manager,p.amount,p.received,p.deadline,projectStatus(p),projectProgress(p)+'%',s.name,s.plan,s.actual,s.owner,s.status]))];}
   else if(type==='movements'){name='库存出入库流水';rows=[['流水号','类型','产品编号','产品名称','数量','时间','经办人','关联项目','备注'],...db.movements.map(m=>[m.id,m.type==='in'?'入库':'出库',productById(m.productId)?.code,productById(m.productId)?.name,m.quantity,m.date,m.operator,projectById(m.projectId)?.name,m.note])];}
   else if(type==='staff'){name='员工档案';rows=[['姓名','岗位','联系方式','在职状态','入职日期','待办任务','逾期任务','项目节点','在管项目','备注'],...db.staff.map(s=>{const w=staffWorkload(s.name);return [s.name,s.role,s.phone,s.status,s.joinedAt,w.tasks.length,w.overdue,w.stages.length,w.managed.length,s.note]})];}
+  else if(type==='logs'){name='操作记录';rows=[['时间','操作人','角色','动作','对象','说明'],...(ui.logs||[]).map(l=>[logTime(l.at),l.actor,ROLE_LABEL[l.role]||l.role,ACTION_LABEL[l.action]||l.action,l.target,l.detail])];}
   else {name='经营数据简报';rows=[['指标','数值'],['项目总数',db.projects.length],['进行中项目',db.projects.filter(p=>p.status!=='已完成').length],['合同总额',db.projects.reduce((s,p)=>s+p.amount,0)],['累计回款',db.projects.reduce((s,p)=>s+p.received,0)],['实时库存',db.products.reduce((s,p)=>s+stockOf(p.id),0)],['待办任务',db.tasks.filter(t=>t.status!=='已完成').length]];}
   const csv='\ufeff'+rows.map(row=>row.map(cell=>`"${String(cell??'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`造物集_${name}_${iso()}.csv`;a.click();URL.revokeObjectURL(url);toast(`${name}已导出为 CSV 文件`);
@@ -851,13 +1222,28 @@ function globalSearch(query) {
 }
 
 // 全局交互：统一事件委托，确保动态页面上的按钮始终可用。
+const WRITE_ACTIONS = new Set(['add-client','edit-client','add-product','edit-product','add-project','edit-project',
+  'edit-stage','add-task','add-staff','edit-staff','handover-staff','remove-staff','confirm-remove-staff',
+  'toggle-staff','add-movement','add-invoice','add-payment','load-demo','add-member','reset-member','toggle-member','remove-member','confirm-remove-member']);
+
 document.addEventListener('click',event=>{
   const nav=event.target.closest('[data-nav]');if(nav){navigate(nav.dataset.nav);return;}
   const close=event.target.closest('[data-close]');if(close){close.dataset.close==='modal'?closeModal():closeDrawer();return;}
   const el=event.target.closest('[data-action]');if(!el)return;
   const {action,id}=el.dataset;
+
+  // 只读员工只能查看，写操作在这里统一兜底拦截
+  if(WRITE_ACTIONS.has(action) && !canEdit()){
+    toast('当前为只读员工账号，仅可更新自己负责的任务进度', true);
+    return;
+  }
+  if(['add-member','reset-member','toggle-member','remove-member','confirm-remove-member'].includes(action) && !canManageAccounts()){
+    toast('只有企业管理员可以管理登录账号', true);
+    return;
+  }
+
   if(action==='add-client')openClientForm();  if(action==='edit-client')openClientForm(id);
-  if(action==='view-client')openClientDetail(id);
+  if(action==='view-client'){openClientDetail(id);}
   if(action==='add-product')openProductForm();
   if(action==='edit-product')openProductForm(id);
   if(action==='add-project')openProjectForm();
@@ -871,15 +1257,25 @@ document.addEventListener('click',event=>{
   if(action==='handover-staff')openHandoverForm(id);
   if(action==='remove-staff')openStaffRemove(id);
   if(action==='confirm-remove-staff'){removeStaff(id);closeModal();}
-  if(action==='toggle-staff'){const s=staffById(id);if(s){s.status=s.status==='停用'?'在职':'停用';save();render();toast(`${s.name} 已设为${s.status}`);}}
+  if(action==='toggle-staff'){const s=staffById(id);if(s){s.status=s.status==='停用'?'在职':'停用';audit('update',`员工 · ${s.name}`,`状态改为${s.status}`);save();render();toast(`${s.name} 已设为${s.status}`);}}
+  if(action==='add-member')openMemberForm(id);
+  if(action==='reset-member')openMemberPassword(id);
+  if(action==='toggle-member')toggleMember(id);
+  if(action==='remove-member')openMemberRemove(id);
+  if(action==='confirm-remove-member')removeMember(id);
   if(action==='add-movement')openMovementForm(id,el.dataset.type||'in');
   if(action==='add-invoice')openInvoiceForm(id);
   if(action==='add-payment')openPaymentForm(id);
   if(action==='open-reminders')openReminders();
-  if(action==='load-demo'){db=normalizeDb(structuredClone(seed));save();render();toast('已载入示例数据，可直接修改或清空');}
+  if(action==='load-demo'){db=normalizeDb(structuredClone(seed));audit('create','示例数据','载入整套示例数据');save();render();toast('已载入示例数据，可直接修改或清空');}
   if(action==='task-view'){ui.taskView=el.dataset.view;render();}
   if(action==='inventory-tab'){ui.inventoryTab=el.dataset.tab;ui.filters.inventory={};render();}
   if(action==='export')exportCSV(el.dataset.type||ui.page);
+  if(action==='reload-logs'){renderLogsReload();}
+  if(action==='account-center')openAccountPanel();
+  if(action==='switch-account')switchAccount();
+  if(action==='logout-confirm')confirmLogout();
+  if(action==='confirm-logout')logout();
   if(action==='reminder-go'){closeDrawer();navigate(el.dataset.page);if(el.dataset.page==='projects')setTimeout(()=>openProjectDetail(id),100);if(el.dataset.page==='clients')setTimeout(()=>openClientDetail(id),100);}
   if(action==='search-go'){$('#searchResults').classList.remove('show');$('#globalSearch').value='';navigate(el.dataset.page);if(el.dataset.page==='projects')setTimeout(()=>openProjectDetail(id),100);if(el.dataset.page==='clients')setTimeout(()=>openClientDetail(id),100);if(el.dataset.page==='products')setTimeout(()=>openProductForm(id),100);if(el.dataset.page==='staff')setTimeout(()=>openStaffForm(id),100);}
 });
@@ -887,14 +1283,20 @@ document.addEventListener('click',event=>{
 document.addEventListener('input',event=>{
   const t=event.target;
   if(t.id==='globalSearch')globalSearch(t.value);
-  if(t.dataset.filterSearch){const page=t.dataset.filterSearch;ui.filters[page]={...(ui.filters[page]||{}),search:t.value};clearTimeout(window.filterTimer);window.filterTimer=setTimeout(()=>{render();const input=$(`[data-filter-search="${page}"]`);if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}},180);}
+  if(t.dataset.filterSearch){const page=t.dataset.filterSearch;ui.filters[page]={...(ui.filters[page]||{}),search:t.value};clearTimeout(window.filterTimer);window.filterTimer=setTimeout(()=>{
+    if(page==='logs'){ loadLogs().then(()=>{ if(ui.page==='logs') render(); }); }
+    else render();
+    const input=$(`[data-filter-search="${page}"]`);if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}
+  },180);}
   if(t.closest('#businessForm')&&$('#modalTitle').textContent.includes('产品')) {
     const d=formObject($('#businessForm'));numberFields(d,['designFee','sampleFee','moldFee','quantity','unitCost','retail','discount']);const cost=productCost(d);if($('#calcCost')){$('#calcCost').textContent=money(cost);$('#calcMargin').textContent=`${productMargin(d).toFixed(1)}%`;$('#calcDiscountMargin').textContent=`${((d.retail*d.discount-cost)/(d.retail*d.discount||1)*100).toFixed(1)}%`;}
   }
 });
 document.addEventListener('change',event=>{
   const t=event.target;
-  if(t.dataset.filterKey){ui.filters[t.dataset.filterPage]={...(ui.filters[t.dataset.filterPage]||{}),[t.dataset.filterKey]:t.value};render();}
+  if(t.dataset.filterKey){ui.filters[t.dataset.filterPage]={...(ui.filters[t.dataset.filterPage]||{}),[t.dataset.filterKey]:t.value};
+    if(t.dataset.filterPage==='logs'){ loadLogs().then(()=>{ if(ui.page==='logs') render(); }); } else render();
+  }
   if(t.name==='productId'&&t.closest('#businessForm')&&$('#modalTitle').textContent==='出入库登记')$('#availableStock').textContent=`${stockOf(t.value)} 件`;
 });
 // 表单在打开弹窗时直接绑定 submit，避免原生提交导致页面刷新。
@@ -905,13 +1307,9 @@ $('#drawerMask').addEventListener('click',closeDrawer);
 $('#modalMask').addEventListener('click',e=>{if(e.target===$('#modalMask'))closeModal();});
 $('#menuToggle').addEventListener('click',()=>{$('#sidebar').classList.add('show');$('#mobileMask').classList.add('show');});
 $('#mobileMask').addEventListener('click',()=>{$('#sidebar').classList.remove('show');$('#mobileMask').classList.remove('show');});
-$('#profileBtn').addEventListener('click',()=>{
-  const user = (session && session.user) || {};
-  const companyName = (session && session.company && session.company.name) || '';
-  toast(`当前账号「${user.displayName || user.username || '未登录'}」· ${companyName}`);
-});
-const logoutBtn = $('#logoutBtn'); if (logoutBtn) logoutBtn.addEventListener('click', logout);
-const mLogoutBtn = $('#mLogoutBtn'); if (mLogoutBtn) mLogoutBtn.addEventListener('click', logout);
+$('#profileBtn').addEventListener('click',openAccountPanel);
+const logoutBtn = $('#logoutBtn'); if (logoutBtn) logoutBtn.addEventListener('click', confirmLogout);
+const mLogoutBtn = $('#mLogoutBtn'); if (mLogoutBtn) mLogoutBtn.addEventListener('click', confirmLogout);
 document.addEventListener('keydown',event=>{
   if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();$('#globalSearch').focus();}
   if(event.key==='Escape'){closeModal();closeDrawer();$('#searchResults').classList.remove('show');}
@@ -927,8 +1325,11 @@ async function bootApp() {
     if (error.message.indexOf('登录状态') !== -1) return;
     toast(`加载数据失败：${error.message}`, true);
   }
+  await loadMembers();
+  applyAccountUI();
   $$('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
   render();
+  logView(`页面 · ${PAGE_LABEL[ui.page] || ui.page}`, `以${ROLE_LABEL[roleOf()] || '员工'}身份进入`);
 }
 
 if (session && session.token) bootApp();

@@ -47,6 +47,8 @@ function mPageHeader(key, desc, action='') {
   return `<header class="m-page-header"><div><span class="m-eyebrow">${meta.eyebrow}</span><h1 class="m-page-title">${meta.title}</h1><p>${desc}</p></div>${action}</header>`;
 }
 function mHeaderAction(action, iconName, title) {
+  // 只读员工账号不显示新增类操作
+  if (!canEdit()) return '';
   return `<button class="m-page-action" data-action="${action}" title="${title}">${mIcon(iconName)}</button>`;
 }
 function mSummary(items) {
@@ -107,9 +109,9 @@ function mProductCard(product, compact=false) {
     <div class="m-product-name-row"><strong>${mEsc(product.name)}</strong><span>${mEsc(product.type)}</span></div>
     <div class="m-cost-grid"><div><span>单件成本</span><strong>${mMoney(cost)}</strong></div><div><span>零售价</span><strong>${mMoney(product.retail)}</strong></div><div><span>毛利率</span><strong class="green">${margin.toFixed(1)}%</strong></div></div>
     <div class="m-product-stock-row"><div class="m-inline-stock"><span>实时库存</span><strong class="${low?'low':''}">${stock}</strong><div class="m-mini-meter"><i class="${low?'low':''}" style="width:${clamp(stock/(product.minStock*3)*100,3,100)}%"></i></div></div>
-      <div class="m-stock-actions"><button class="m-stock-btn in" data-action="add-movement" data-id="${product.id}" data-type="in">${mIcon('inbound')}入库</button><button class="m-stock-btn out" data-action="add-movement" data-id="${product.id}" data-type="out">${mIcon('outbound')}出库</button></div>
+      ${canEdit()?`<div class="m-stock-actions"><button class="m-stock-btn in" data-action="add-movement" data-id="${product.id}" data-type="in">${mIcon('inbound')}入库</button><button class="m-stock-btn out" data-action="add-movement" data-id="${product.id}" data-type="out">${mIcon('outbound')}出库</button></div>`:''}
     </div>
-    ${compact?'':`<div style="margin-top:9px;text-align:right"><button class="m-text-btn" data-action="edit-product" data-id="${product.id}">编辑产品成本 ${mIcon('chevron')}</button></div>`}
+    ${(compact||!canEdit())?'':`<div style="margin-top:9px;text-align:right"><button class="m-text-btn" data-action="edit-product" data-id="${product.id}">编辑产品成本 ${mIcon('chevron')}</button></div>`}
   </article>`;
 }
 function mStockCard(product) {
@@ -118,7 +120,7 @@ function mStockCard(product) {
   return `<article class="m-stock-card" data-mcard="inventory" data-mtext="${mEsc(`${product.name}${product.code}${product.type}`.toLowerCase())}">
     <div class="m-stock-top"><div><h3>${mEsc(product.name)}</h3><span class="m-stock-code">${mEsc(product.code)} · ${mEsc(product.type)}</span></div><div class="m-stock-number"><strong style="${low?'color:var(--m-red)':''}">${stock}</strong><small>${low?'低于安全库存':'件可用'}</small></div></div>
     <div class="m-stock-details"><div><span>零售价</span><strong>${mMoney(product.retail)}</strong></div><div><span>综合成本</span><strong>${mMoney(productCost(product))}</strong></div><div><span>折扣率</span><strong>${Math.round(product.discount*100)}%</strong></div></div>
-    <div class="m-stock-actions"><button class="m-stock-btn in" data-action="add-movement" data-id="${product.id}" data-type="in">${mIcon('inbound')}入库登记</button><button class="m-stock-btn out" data-action="add-movement" data-id="${product.id}" data-type="out">${mIcon('outbound')}出库登记</button></div>
+    ${canEdit()?`<div class="m-stock-actions"><button class="m-stock-btn in" data-action="add-movement" data-id="${product.id}" data-type="in">${mIcon('inbound')}入库登记</button><button class="m-stock-btn out" data-action="add-movement" data-id="${product.id}" data-type="out">${mIcon('outbound')}出库登记</button></div>`:''}
   </article>`;
 }
 function mMovementCard(movement) {
@@ -148,14 +150,14 @@ function renderMobileDashboard() {
   const date = new Intl.DateTimeFormat('zh-CN',{month:'numeric',day:'numeric'}).format(new Date()).split('/');
   const weekday = new Intl.DateTimeFormat('zh-CN',{weekday:'short'}).format(new Date());
   return `<section class="m-greeting">
-      <div class="m-greeting-top"><div><span class="m-eyebrow">MY WORKSPACE · 造物集</span><h1>${greeting}，林然</h1><p>${pendingTasks.length} 项工作待推进，${dueSoon ? `${dueSoon} 项临近截止` : '暂无临期任务'}。</p></div><div class="m-today"><strong>${date[1] || new Date().getDate()}</strong><small>${date[0] ? `${date[0]}月 · ` : ''}${weekday}</small></div></div>
+      <div class="m-greeting-top"><div><span class="m-eyebrow">MY WORKSPACE · 造物集</span><h1>${greeting}，${mEsc(currentStaffName() || '同事')}</h1><p>${pendingTasks.length} 项工作待推进，${dueSoon ? `${dueSoon} 项临近截止` : '暂无临期任务'}。</p></div><div class="m-today"><strong>${date[1] || new Date().getDate()}</strong><small>${date[0] ? `${date[0]}月 · ` : ''}${weekday}</small></div></div>
     </section>
-    <div class="m-quick-actions">
+    ${canEdit()?`<div class="m-quick-actions">
       <button class="m-quick-action" data-action="add-project"><span>${mIcon('route')}</span>新建项目</button>
       <button class="m-quick-action" data-action="add-task"><span>${mIcon('check')}</span>分配任务</button>
       <button class="m-quick-action" data-action="add-movement" data-type="in"><span>${mIcon('inbound')}</span>登记入库</button>
       <button class="m-quick-action" data-mnav="clients"><span>${mIcon('users')}</span>客户档案</button>
-    </div>
+    </div>`:`<button class="m-alert-banner" data-action="account-center"><span class="m-alert-icon">${mIcon('eye')}</span><div class="m-alert-text"><strong>当前为只读员工账号</strong><small>可查看全部数据，仅能更新自己负责任务的进度</small></div>${mIcon('chevron')}</button>`}
     <div class="m-kpis">
       <div class="m-kpi"><div class="m-kpi-head"><span>进行中项目</span><span class="m-kpi-icon">${mIcon('route')}</span></div><div class="m-kpi-value">${active.length}<small>个</small></div><div class="m-kpi-foot"><span class="warn">${delayed} 个延期</span><span>· 共 ${db.projects.length} 个项目</span></div></div>
       <div class="m-kpi"><div class="m-kpi-head"><span>项目回款</span><span class="m-kpi-icon blue">${mIcon('wallet')}</span></div><div class="m-kpi-value">${mMoney(received,true)}</div><div class="m-kpi-foot"><span>回款率 ${Math.round(contract?received/contract*100:0)}%</span></div></div>
@@ -165,7 +167,7 @@ function renderMobileDashboard() {
     ${priorityReminder ? `<button class="m-alert-banner" data-action="open-reminders"><span class="m-alert-icon">${mIcon('warning')}</span><div class="m-alert-text"><strong>${mEsc(priorityReminder.title)}</strong><small>${mEsc(priorityReminder.desc)}</small></div>${mIcon('chevron')}</button>` : ''}
     <section class="m-section"><div class="m-section-head"><div class="m-section-title"><i></i><h2>重点项目</h2></div><button class="m-section-link" data-mnav="projects">全部项目 ${mIcon('arrow')}</button></div><div class="m-project-list">${recentProjects.map(mProjectCard).join('') || mEmpty('暂无进行中项目')}</div></section>
     <section class="m-section"><div class="m-section-head"><div class="m-section-title"><i></i><h2>今日待办</h2></div><button class="m-section-link" data-mnav="tasks">全部任务 ${mIcon('arrow')}</button></div><div class="m-task-list">${tasks.map(mTaskRow).join('') || mEmpty('今天的任务已全部完成')}</div></section>
-    ${lowStocks.length ? `<section class="m-section"><div class="m-section-head"><div class="m-section-title"><i></i><h2>库存提醒</h2></div><button class="m-section-link" data-mnav="inventory">库存明细 ${mIcon('arrow')}</button></div><div class="m-stock-list">${lowStocks.slice(0,2).map(p=>`<div class="m-stock-warning" data-action="add-movement" data-id="${p.id}" data-type="in"><span class="m-stock-warning-icon">${mIcon('warning')}</span><div><strong>${mEsc(p.name)}库存偏低</strong><small>当前 ${stockOf(p.id)} 件 · 安全库存 ${p.minStock} 件</small></div><b>${stockOf(p.id)}</b></div>`).join('')}</div></section>` : ''}`;
+    ${lowStocks.length ? `<section class="m-section"><div class="m-section-head"><div class="m-section-title"><i></i><h2>库存提醒</h2></div><button class="m-section-link" data-mnav="inventory">库存明细 ${mIcon('arrow')}</button></div><div class="m-stock-list">${lowStocks.slice(0,2).map(p=>`<div class="m-stock-warning" ${canEdit()?`data-action="add-movement" data-id="${p.id}" data-type="in"`:''}><span class="m-stock-warning-icon">${mIcon('warning')}</span><div><strong>${mEsc(p.name)}库存偏低</strong><small>当前 ${stockOf(p.id)} 件 · 安全库存 ${p.minStock} 件</small></div><b>${stockOf(p.id)}</b></div>`).join('')}</div></section>` : ''}`;
 }
 
 function renderMobileProjects() {
@@ -189,7 +191,7 @@ function renderMobileTasks() {
     const hay = `${t.title}${t.owner}${t.role}${projectById(t.projectId)?.name || ''}`.toLowerCase();
     return (!mUi.search.tasks || hay.includes(mUi.search.tasks.toLowerCase())) && (!mUi.taskStatus || t.status === mUi.taskStatus);
   });
-  if (ui.taskView === 'personal') tasks = tasks.filter(t=>t.owner === '林然');
+  if (ui.taskView === 'personal') tasks = tasks.filter(t=>t.owner === currentStaffName());
   tasks = [...tasks].sort((a,b)=>{
     const order = {'进行中':0,'待开始':1,'已完成':2};
     return order[a.status] - order[b.status] || a.due.localeCompare(b.due);
@@ -198,7 +200,7 @@ function renderMobileTasks() {
   const pending = db.tasks.filter(t=>t.status !== '已完成');
   return `${mPageHeader('tasks','任务与项目自动关联，个人与团队节奏清楚可见。',mHeaderAction('add-task','plus','分配任务'))}
     <div class="m-segment"><button data-action="task-view" data-view="team" class="${ui.taskView==='team'?'active':''}">团队视图</button><button data-action="task-view" data-view="personal" class="${ui.taskView==='personal'?'active':''}">我的工作</button></div>
-    ${mSummary([[ui.taskView==='personal'?db.tasks.filter(t=>t.owner==='林然').length:db.tasks.length,'全部任务'],[pending.length,'待推进'],[`${Math.round(completed/db.tasks.length*100)}%`,'完成率']])}
+    ${mSummary([[ui.taskView==='personal'?db.tasks.filter(t=>t.owner===currentStaffName()).length:db.tasks.length,'全部任务'],[pending.length,'待推进'],[`${Math.round(completed/db.tasks.length*100)}%`,'完成率']])}
     ${mSearch('tasks','搜索任务、负责人或项目')}
     <div class="m-filter-chips">${['','待开始','进行中','已完成'].map(s=>mChip(s || '全部状态',mUi.taskStatus===s,`data-mtask-status="${s}"`)).join('')}</div>
     <div class="m-task-list">${tasks.map(mTaskRow).join('') || mEmpty('没有匹配的任务')}</div>`;
@@ -245,7 +247,7 @@ function renderMobileInventory() {
   const totalStock = db.products.reduce((sum,p)=>sum+stockOf(p.id),0);
   return `${mPageHeader('inventory','出入库流水自动更新库存，每一次变动都有据可查。',mHeaderAction('add-movement','inbound','登记入库'))}
     ${mSummary([[totalStock.toLocaleString(),'实时库存'],[db.products.filter(p=>stockOf(p.id)<=p.minStock).length,'低库存'],[db.movements.length,'流水记录']])}
-    <div class="m-stock-toolbar"><button class="secondary-btn" data-action="add-movement" data-type="out">${mIcon('outbound')}出库登记</button><button class="primary-btn" data-action="add-movement" data-type="in">${mIcon('inbound')}入库登记</button></div>
+    ${canEdit()?`<div class="m-stock-toolbar"><button class="secondary-btn" data-action="add-movement" data-type="out">${mIcon('outbound')}出库登记</button><button class="primary-btn" data-action="add-movement" data-type="in">${mIcon('inbound')}入库登记</button></div>`:''}
     <div class="m-segment"><button data-action="inventory-tab" data-tab="stock" class="${tab==='stock'?'active':''}">库存总览</button><button data-action="inventory-tab" data-tab="movements" class="${tab==='movements'?'active':''}">出入库流水</button></div>
     ${mSearch('inventory',tab==='stock'?'搜索产品编号或名称':'搜索产品、经办人或备注')}
     ${tab === 'stock' ? `<div class="m-filter-chips">${['','充足','低库存'].map(s=>mChip(s || '全部库存',mUi.inventoryFilter===s,`data-minventory-filter="${s}"`)).join('')}</div><div class="m-stock-list">${stockList.map(mStockCard).join('') || mEmpty('没有匹配的库存产品')}</div>` : `<div class="m-stock-list">${movements.map(mMovementCard).join('') || mEmpty('暂无出入库流水')}</div>`}`;
@@ -270,11 +272,14 @@ function renderMobileStaff() {
         <div><strong>${w.stages.length}</strong><small>项目节点</small></div>
         <div><strong>${w.managed.length}</strong><small>在管项目</small></div>
       </div>
-      <div class="m-staff-actions">
+      ${!canManageAccounts() ? '' : memberByStaff(s.id)
+        ? `<div class="m-staff-account"><span>${mIcon('key')}${mEsc(memberByStaff(s.id).username)}</span><small>${mEsc(memberRoleLabel(memberByStaff(s.id).role))}${memberByStaff(s.id).status === 'disabled' ? ' · 已停用' : ' · 可登录'}</small></div>`
+        : `<div class="m-staff-account empty"><span>${mIcon('key')}未开通登录账号</span>${canManageAccounts()?`<button class="m-mini-btn" data-action="add-member" data-id="${s.id}">开通账号</button>`:`<small>请联系管理员开通</small>`}</div>`}
+      ${canEdit()?`<div class="m-staff-actions">
         <button class="m-mini-btn" data-action="handover-staff" data-id="${s.id}">${mIcon('shuffle')}交接</button>
         <button class="m-mini-btn" data-action="edit-staff" data-id="${s.id}">${mIcon('edit')}编辑</button>
         <button class="m-mini-btn" data-action="toggle-staff" data-id="${s.id}">${off ? '恢复' : '停用'}</button>
-      </div>
+      </div>`:''}
     </article>`;
   }).join('');
   return `${mPageHeader('staff', '维护员工档案，任务与项目节点可一键交接给同事', mHeaderAction('add-staff', 'plus', '新增员工'))}
@@ -285,8 +290,10 @@ function renderMobileStaff() {
 
 function updateMobileShell() {
   const meta = META[ui.page] || META.dashboard;
-  // 页头副标题优先显示当前公司，便于确认自己在哪家客户的数据里
-  $('#mHeaderSub').textContent = window.__companyName || meta.label;
+  // 页头副标题显示「公司 · 角色」，便于确认自己在哪家客户、以什么身份操作
+  $('#mHeaderSub').textContent = window.__companyName
+    ? [window.__companyName, window.__roleName].filter(Boolean).join(' · ')
+    : meta.label;
   $('#projectNavCount').textContent = db.projects.filter(p=>p.status !== '已完成').length;
   $('#taskNavCount').textContent = db.tasks.filter(t=>t.status !== '已完成').length;
   $('#notificationDot').classList.toggle('show',getReminders().length > 0);

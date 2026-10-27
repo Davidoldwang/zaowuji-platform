@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="造物集 · 文创产品开发管理平台登录与公司注册">
+  <meta name="description" content="造物集 · 文创产品开发管理平台登录，支持企业管理员与员工（店长/员工）分别登录">
   <title>登录 · 造物集文创业务管理平台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2318352d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' fill='white'%3E造%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="login.css">
@@ -20,8 +20,8 @@
         <h1>把每一个好创意，<br><em>稳稳落地。</em></h1>
         <p>客户、产品、开发进度、团队协作与库存账实，在一处清晰流转。每家公司独立账号，数据互不可见。</p>
         <div class="aside-list">
-          <div class="aside-item"><i>01</i><div><b>项目全流程可视</b><span>设计、打样、定稿到大货生产，节点延期一目了然</span></div></div>
-          <div class="aside-item"><i>02</i><div><b>成本与毛利自动测算</b><span>设计费、打样费、开模费摊销，实时得出成本价</span></div></div>
+          <div class="aside-item"><i>01</i><div><b>企业与管理账号分离</b><span>企业入口管全公司，员工入口按公司 + 员工账号登录</span></div></div>
+          <div class="aside-item"><i>02</i><div><b>店长编辑留痕</b><span>店长可查看与编辑业务，每次查看与修改都写入操作记录</span></div></div>
           <div class="aside-item"><i>03</i><div><b>库存流水账实相符</b><span>独立出入库登记，库存自动更新且不会为负</span></div></div>
         </div>
       </div>
@@ -31,34 +31,57 @@
     <main class="auth-main">
       <div class="auth-card">
         <div class="auth-head">
-          <h2 id="authTitle">欢迎回来</h2>
-          <p id="authDesc">输入公司名称和密码，进入你所在公司的工作台。</p>
+          <h2 id="authTitle">企业登录</h2>
+          <p id="authDesc">用注册时填写的公司名称和密码进入全公司工作台。</p>
         </div>
 
-        <div class="auth-tabs" role="tablist">
-          <button type="button" class="active" data-tab="login" role="tab">登录</button>
-          <button type="button" data-tab="register" role="tab">注册公司</button>
+        <div class="role-switch" id="roleSwitch" role="tablist">
+          <button type="button" class="active" data-role="company" role="tab">
+            <span class="role-icon">企</span>
+            <span class="role-text"><strong>企业登录</strong><small>公司管理员 · 全公司权限</small></span>
+          </button>
+          <button type="button" data-role="staff" role="tab">
+            <span class="role-icon">员</span>
+            <span class="role-text"><strong>员工登录</strong><small>店长 / 员工账号</small></span>
+          </button>
         </div>
 
         <div class="auth-alert" id="authAlert"></div>
 
         <form class="auth-form" id="loginForm" novalidate>
           <div class="field">
-            <label for="loginUsername">公司名称 / 账号</label>
-            <input id="loginUsername" name="username" type="text" autocomplete="username" placeholder="注册时填的公司名称" required>
+            <label for="loginCompany">公司名称</label>
+            <input id="loginCompany" name="companyName" type="text" autocomplete="organization" placeholder="注册时填写的公司名称" required>
           </div>
           <div class="field">
             <label for="loginPassword">密码</label>
-            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入管理员密码" required>
           </div>
-          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">登录进入工作台</span></button>
+          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">进入企业工作台</span></button>
+        </form>
+
+        <form class="auth-form hidden" id="staffForm" novalidate>
+          <div class="field">
+            <label for="staffCompany">所属公司</label>
+            <input id="staffCompany" name="companyName" type="text" autocomplete="organization" placeholder="公司名称，例如：宋韵文化" required>
+          </div>
+          <div class="field">
+            <label for="staffUsername">员工账号</label>
+            <input id="staffUsername" name="username" type="text" autocomplete="username" placeholder="由公司管理员开通，例如 liran" required>
+          </div>
+          <div class="field">
+            <label for="staffPassword">密码</label>
+            <input id="staffPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入员工密码" required>
+          </div>
+          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">进入员工工作台</span></button>
+          <p class="form-tip">还没有员工账号？请联系本公司管理员，在「员工管理 → 开通账号」中为你创建。</p>
         </form>
 
         <form class="auth-form hidden" id="registerForm" novalidate>
           <div class="field">
             <label for="regCompany">公司名称 <em>*</em></label>
             <input id="regCompany" name="companyName" type="text" autocomplete="organization" placeholder="例如：宋韵文化" maxlength="32" required>
-            <small>直接填中文名称即可，它就是你的登录账号。</small>
+            <small>直接填中文名称即可，它就是企业登录账号。</small>
           </div>
           <div class="field">
             <label for="regPassword">设置密码 <em>*</em></label>
@@ -70,6 +93,11 @@
           </div>
           <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">注册并进入工作台</span></button>
         </form>
+
+        <div class="auth-switch-line">
+          <button type="button" id="toRegister">还没有公司账号？<b>立即注册</b></button>
+          <button type="button" id="toLogin" class="hidden">已有账号？<b>返回登录</b></button>
+        </div>
 
         <p class="auth-foot">注册即代表你同意以本公司名义管理平台内的业务数据。<br>忘记密码请联系本公司管理员重置。</p>
       </div>

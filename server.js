@@ -123,6 +123,23 @@ async function currentSession(req) {
   return session ? { ...session, token } : null;
 }
 
+/* 角色：admin 企业管理员 / manager 店长 / staff 员工 */
+const ROLE_RANK = { admin: 3, manager: 2, staff: 1 };
+const ROLE_LABEL = { admin: '企业管理员', manager: '店长', staff: '员工' };
+const rankOf = user => ROLE_RANK[(user && user.role) || 'staff'] || 1;
+
+async function requireSession(req, res, minRank = 1) {
+  const session = await currentSession(req);
+  if (!session) { fail(res, 401, '登录状态已失效，请重新登录'); return null; }
+  if (rankOf(session.user) < minRank) {
+    fail(res, 403, minRank >= 3 ? '仅企业管理员可执行该操作' : '当前角色没有该操作权限');
+    return null;
+  }
+  return session;
+}
+
+const actorOf = session => session.user.displayName || session.user.username || '未知';
+
 /* ------------------------------------------------------------------ */
 /* 业务接口                                                            */
 /* ------------------------------------------------------------------ */
@@ -159,34 +176,70 @@ async function handleRegister(req, res) {
 
 async function handleLogin(req, res) {
   const body = await readBody(req);
+  const mode = body.mode === 'staff' ? 'staff' : 'company';
+  const companyName = str(body.companyName, 60);
   const username = str(body.username, 32);
   const password = typeof body.password === 'string' ? body.password : '';
-  if (!username || !password) return fail(res, 400, '请输入账号和密码');
+
+  if (mode === 'staff') {
+    if (!companyName || !username || !password) return fail(res, 400, '请输入公司名称、员工账号和密码');
+  } else if (!companyName || !password) {
+    return fail(res, 400, '请输入公司名称和密码');
+  }
 
   const ip = req.socket.remoteAddress || 'unknown';
-  const key = `${ip}|${username.toLowerCase()}`;
+  const key = `${ip}|${mode}|${companyName.toLowerCase()}|${username.toLowerCase()}`;
   if (rateHit(key)) return fail(res, 429, '尝试次数过多，请 10 分钟后再试');
 
-  let user = await store.findUserByUsername(username);
-  // 支持直接用公司名称登录（早期用英文账号注册的公司也能这样进）
-  if (!user) user = await store.findUserByCompanyName(username);
+  let user = null;
+  if (mode === 'staff') {
+    const company = await store.findCompanyByName(companyName);
+    if (company) user = await store.findCompanyMember(company.id, username);
+  } else {
+    user = await store.findCompanyAdmin(companyName);
+    // 兼容早期用英文账号注册的公司：公司名查不到时按账号再查一次
+    if (!user) {
+      const legacy = await store.findUserByUsername(companyName);
+      if (legacy && legacy.role === 'admin') user = legacy;
+    }
+  }
+
   // 账号不存在时也执行一次同代价校验，避免通过响应时间探测账号
   const ok = verifyPassword(password, user ? user.passwordHash : 'scrypt$00$00');
-  if (!user || !ok) return fail(res, 401, '公司名称或密码不正确');
+  if (!user || !ok) {
+    return fail(res, 401, mode === 'staff' ? '公司名称、员工账号或密码不正确' : '公司名称或密码不正确');
+  }
+  if (user.status === 'disabled') return fail(res, 403, '该账号已停用，请联系公司管理员');
 
   rateClear(key);
   const company = await store.getCompany(user.companyId);
   const { token, expiresAt } = await store.createSession(user.id, SESSION_TTL_MS);
+  if (user.role !== 'staff') {
+    store.addAuditLogs(user.companyId, [{
+      actor: user.displayName || user.username, role: user.role, action: 'login',
+      target: ROLE_LABEL[user.role] || user.role, detail: `${mode === 'staff' ? '员工入口' : '企业入口'}登录成功`
+    }]).catch(() => {});
+  }
   json(res, 200, {
     token,
     expiresAt,
-    user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+    user: {
+      id: user.id, username: user.username, displayName: user.displayName,
+      role: user.role, staffId: user.staffId || null
+    },
     company: company ? { id: company.id, name: company.name } : { id: user.companyId, name: '未命名公司' }
   });
 }
 
 async function handleLogout(req, res) {
   const token = bearer(req);
+  const session = await currentSession(req);
+  if (session && session.user.role !== 'staff') {
+    store.addAuditLogs(session.user.companyId, [{
+      actor: actorOf(session), role: session.user.role, action: 'logout',
+      target: ROLE_LABEL[session.user.role] || session.user.role, detail: '退出登录'
+    }]).catch(() => {});
+  }
   if (token) await store.deleteSession(token);
   json(res, 200, { ok: true });
 }
@@ -198,7 +251,8 @@ async function handleMe(req, res) {
   json(res, 200, {
     user: {
       id: session.user.id, username: session.user.username,
-      displayName: session.user.displayName, role: session.user.role
+      displayName: session.user.displayName, role: session.user.role,
+      staffId: session.user.staffId || null
     },
     company: company || { id: session.user.companyId, name: '未命名公司' }
   });
@@ -217,6 +271,109 @@ async function handlePutData(req, res, session) {
   for (const key of keys) payload[key] = body[key];
   await store.putTenantData(session.user.companyId, payload);
   json(res, 200, { ok: true, savedAt: new Date().toISOString() });
+}
+
+/* -------------------------- 员工账号管理（仅企业管理员） -------------------------- */
+
+const MEMBER_ROLES = ['manager', 'staff'];
+
+async function handleListMembers(req, res, session) {
+  const members = await store.listMembers(session.user.companyId);
+  json(res, 200, { members });
+}
+
+async function handleCreateMember(req, res, session) {
+  const body = await readBody(req);
+  const username = str(body.username, 32);
+  const password = typeof body.password === 'string' ? body.password : '';
+  const role = MEMBER_ROLES.includes(body.role) ? body.role : 'staff';
+  const displayName = str(body.displayName, 32);
+  const staffId = str(body.staffId, 40);
+
+  if (!/^[A-Za-z0-9_.-]{2,32}$/.test(username)) {
+    return fail(res, 400, '员工账号请用 2-32 位字母、数字、下划线或点');
+  }
+  if (password.length < 6) return fail(res, 400, '初始密码至少 6 位');
+  if (!displayName) return fail(res, 400, '请填写员工姓名');
+
+  const result = await store.createMember({
+    companyId: session.user.companyId, username,
+    passwordHash: hashPassword(password), displayName, role, staffId: staffId || null
+  });
+  if (result.error) return fail(res, 409, result.error);
+  store.addAuditLogs(session.user.companyId, [{
+    actor: actorOf(session), role: session.user.role, action: 'account',
+    target: `账号 · ${username}`, detail: `为「${displayName}」开通${ROLE_LABEL[role]}账号`
+  }]).catch(() => {});
+  json(res, 201, { id: result.id });
+}
+
+async function handleUpdateMember(req, res, session, memberId) {
+  const body = await readBody(req);
+  const patch = {};
+  if (body.password) {
+    if (String(body.password).length < 6) return fail(res, 400, '新密码至少 6 位');
+    patch.passwordHash = hashPassword(String(body.password));
+  }
+  if (MEMBER_ROLES.includes(body.role)) patch.role = body.role;
+  if (body.status === 'active' || body.status === 'disabled') patch.status = body.status;
+  if (body.displayName !== undefined) patch.displayName = str(body.displayName, 32);
+  if (body.staffId !== undefined) patch.staffId = str(body.staffId, 40);
+  if (!Object.keys(patch).length) return fail(res, 400, '没有需要更新的内容');
+
+  await store.updateMember(session.user.companyId, memberId, patch);
+  const label = [patch.passwordHash ? '重置密码' : '', patch.role ? `角色改为${ROLE_LABEL[patch.role]}` : '',
+    patch.status ? (patch.status === 'disabled' ? '停用账号' : '启用账号') : ''].filter(Boolean).join('、');
+  store.addAuditLogs(session.user.companyId, [{
+    actor: actorOf(session), role: session.user.role, action: 'account',
+    target: `账号 · ${body.username || memberId}`, detail: label
+  }]).catch(() => {});
+  json(res, 200, { ok: true });
+}
+
+async function handleDeleteMember(req, res, session, memberId) {
+  await store.deleteMember(session.user.companyId, memberId);
+  store.addAuditLogs(session.user.companyId, [{
+    actor: actorOf(session), role: session.user.role, action: 'account',
+    target: `账号 · ${memberId}`, detail: '删除员工账号'
+  }]).catch(() => {});
+  json(res, 200, { ok: true });
+}
+
+/* -------------------------- 操作记录 -------------------------- */
+
+async function handlePostLogs(req, res, session) {
+  const body = await readBody(req);
+  const entries = (Array.isArray(body.entries) ? body.entries : []).map(entry => ({
+    actor: actorOf(session), role: session.user.role,
+    action: entry.action, target: entry.target, detail: entry.detail
+  }));
+  await store.addAuditLogs(session.user.companyId, entries);
+  json(res, 200, { ok: true });
+}
+
+async function handleGetLogs(req, res, session, query) {
+  const logs = await store.listAuditLogs(session.user.companyId, {
+    limit: query.get('limit'), action: query.get('action'), keyword: query.get('keyword')
+  });
+  json(res, 200, { logs });
+}
+
+/* 员工自助更新自己负责的任务进度 */
+async function handleTaskProgress(req, res, session, taskId) {
+  const body = await readBody(req);
+  const result = await store.updateTenantTask(
+    session.user.companyId, taskId,
+    { status: str(body.status, 12), progress: body.progress },
+    session.user.displayName
+  );
+  if (result.error === 'notfound') return fail(res, 404, '任务不存在');
+  if (result.error === 'forbidden') return fail(res, 403, '只能更新自己负责的任务');
+  store.addAuditLogs(session.user.companyId, [{
+    actor: actorOf(session), role: session.user.role, action: 'update',
+    target: `任务 · ${result.task.title}`, detail: `更新为「${result.task.status}」· 进度 ${result.task.progress}%`
+  }]).catch(() => {});
+  json(res, 200, { task: result.task });
 }
 
 /* ------------------------------------------------------------------ */
@@ -273,14 +430,48 @@ const server = http.createServer(async (req, res) => {
       if (route === 'POST /api/logout') return await handleLogout(req, res);
       if (route === 'GET /api/me') return await handleMe(req, res);
       if (route === 'GET /api/data') {
-        const session = await currentSession(req);
-        if (!session) return fail(res, 401, '登录状态已失效，请重新登录');
+        const session = await requireSession(req, res);
+        if (!session) return;
         return json(res, 200, await store.getTenantData(session.user.companyId));
       }
       if (route === 'PUT /api/data') {
-        const session = await currentSession(req);
-        if (!session) return fail(res, 401, '登录状态已失效，请重新登录');
+        // 员工为只读角色，不允许整体覆盖业务数据
+        const session = await requireSession(req, res, 2);
+        if (!session) return;
         return await handlePutData(req, res, session);
+      }
+      if (route === 'GET /api/members') {
+        const session = await requireSession(req, res, 3);
+        if (!session) return;
+        return await handleListMembers(req, res, session);
+      }
+      if (route === 'POST /api/members') {
+        const session = await requireSession(req, res, 3);
+        if (!session) return;
+        return await handleCreateMember(req, res, session);
+      }
+      if (pathname.startsWith('/api/members/')) {
+        const memberId = pathname.slice('/api/members/'.length);
+        const session = await requireSession(req, res, 3);
+        if (!session) return;
+        if (req.method === 'PATCH') return await handleUpdateMember(req, res, session, memberId);
+        if (req.method === 'DELETE') return await handleDeleteMember(req, res, session, memberId);
+        return fail(res, 405, '不支持的请求方式');
+      }
+      if (route === 'GET /api/logs') {
+        const session = await requireSession(req, res, 2);
+        if (!session) return;
+        return await handleGetLogs(req, res, session, new URL(req.url, 'http://localhost').searchParams);
+      }
+      if (route === 'POST /api/logs') {
+        const session = await requireSession(req, res);
+        if (!session) return;
+        return await handlePostLogs(req, res, session);
+      }
+      if (req.method === 'PATCH' && /^\/api\/tasks\/[^/]+$/.test(pathname)) {
+        const session = await requireSession(req, res);
+        if (!session) return;
+        return await handleTaskProgress(req, res, session, decodeURIComponent(pathname.split('/').pop()));
       }
       return fail(res, 404, '接口不存在');
     }

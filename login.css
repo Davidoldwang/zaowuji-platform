@@ -116,28 +116,45 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(46, 114, 88,
 .auth-head h2 { font-family: 'Noto Serif SC', serif; font-size: 27px; margin: 0 0 8px; letter-spacing: 1px; }
 .auth-head p { margin: 0; color: var(--muted); font-size: 12.5px; }
 
-.auth-tabs {
+/* 登录入口切换：企业登录 / 员工登录 */
+.role-switch {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  background: var(--surface-soft);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  margin-bottom: 24px;
+  gap: 10px;
+  margin-bottom: 22px;
 }
-.auth-tabs button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  padding: 10px 0;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .5px;
+.role-switch.hidden { display: none; }
+.role-switch button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 13px;
+  color: var(--ink);
   transition: .18s;
 }
-.auth-tabs button.active { background: var(--surface); color: var(--ink); box-shadow: 0 3px 10px rgba(24, 53, 45, .07); }
+.role-switch button:hover { border-color: #cdd6cd; transform: translateY(-1px); }
+.role-switch button.active {
+  border-color: var(--green-bright);
+  background: var(--green-soft);
+  box-shadow: 0 6px 16px rgba(31, 90, 70, .10);
+}
+.role-icon {
+  width: 30px; height: 30px; flex: none;
+  border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  font-family: 'Noto Serif SC', serif;
+  font-size: 14px;
+  color: var(--muted);
+}
+.role-switch button.active .role-icon { background: var(--ink); border-color: var(--ink); color: #f7f5eb; }
+.role-text strong { display: block; font-size: 12.5px; font-weight: 700; letter-spacing: .3px; }
+.role-text small { display: block; font-size: 10.5px; color: var(--muted); margin-top: 3px; }
 
 .auth-alert {
   display: none;
@@ -208,6 +225,29 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(46, 114, 88,
 
 .auth-foot { margin-top: 22px; text-align: center; font-size: 11.5px; color: var(--muted-2); line-height: 1.9; }
 .auth-foot a { color: var(--green-bright); text-decoration: none; }
+
+.form-tip {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  line-height: 1.8;
+  color: var(--muted-2);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  padding: 9px 11px;
+}
+
+.auth-switch-line { margin-top: 18px; text-align: center; }
+.auth-switch-line button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.auth-switch-line button b { color: var(--green-bright); font-weight: 600; margin-left: 2px; text-decoration: underline; text-underline-offset: 3px; }
+.auth-switch-line button.hidden { display: none; }
+.auth-switch-line button:hover b { color: var(--ink); }
 
 @media (max-width: 980px) {
   .auth-shell { grid-template-columns: 1fr; }

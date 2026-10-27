@@ -543,3 +543,96 @@ tbody tr:hover { background: #fbfcfa; }
 }
 .pick-row, .pick-all { display: flex; align-items: flex-start; }
 .pick-text { flex: 1; }
+
+/* ------------------------------------------------------------------ */
+/* 角色权限：只读提示 / 账号信息 / 员工登录账号 / 修改记录              */
+/* ------------------------------------------------------------------ */
+.hidden { display: none !important; }
+
+.readonly-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-radius: 9px;
+  background: #f0f2ee; color: var(--muted);
+  font-size: 10.5px; font-weight: 600; letter-spacing: .3px;
+}
+.readonly-chip svg { width: 12px; height: 12px; }
+
+.readonly-value {
+  padding: 10px 12px; border-radius: 9px;
+  background: #f7f8f5; border: 1px solid var(--line);
+  font-size: 11.5px; color: var(--ink); font-weight: 500;
+}
+
+/* 员工卡片上的登录账号区块 */
+.staff-account {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 12px; padding: 10px 11px;
+  border: 1px dashed rgba(31,90,70,.22); border-radius: 10px;
+  background: rgba(233,241,235,.5);
+}
+.staff-account.empty { border-color: var(--line); background: #f8f9f6; }
+.staff-account.off { border-color: rgba(200,84,79,.25); background: var(--red-soft); }
+.account-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-bright); flex: none; }
+.staff-account.empty .account-dot { background: #c3cac3; }
+.staff-account.off .account-dot { background: var(--red); }
+.staff-account > div:not(.staff-account-actions) { min-width: 0; flex: 1; }
+.staff-account strong { display: block; font-size: 11px; font-weight: 600; color: var(--ink); }
+.staff-account small { display: block; font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+.staff-account-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.staff-account-actions .ghost-btn { font-size: 9.5px; padding: 3px 6px; }
+.staff-account > .ghost-btn { flex: none; font-size: 10px; }
+
+/* 账号信息弹窗 */
+.account-hero {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px; border-radius: 13px;
+  background: linear-gradient(135deg, #1f3f34, #16302a);
+  color: #f3f1e7; margin-bottom: 16px;
+}
+.account-avatar {
+  width: 42px; height: 42px; border-radius: 12px; flex: none;
+  display: grid; place-items: center;
+  background: #f7f5eb; color: #18352d;
+  font-family: 'Noto Serif SC', serif; font-size: 18px;
+}
+.account-hero h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .5px; }
+.account-hero p { margin: 3px 0 0; font-size: 10.5px; color: rgba(243,241,231,.7); }
+.account-hero .badge { margin-left: auto; background: rgba(255,255,255,.14); color: #dcece2; }
+.account-meta { margin-bottom: 4px; }
+.perm-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.perm-list li {
+  position: relative; padding-left: 16px;
+  font-size: 11px; line-height: 1.7; color: var(--muted);
+}
+.perm-list li:before {
+  content: ''; position: absolute; left: 3px; top: 7px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--green-bright);
+  opacity: .55;
+}
+
+/* 修改记录 */
+.log-action {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 42px; padding: 3px 8px; border-radius: 6px;
+  font-size: 9.5px; font-weight: 600;
+  background: #f0f2ee; color: #6d7872;
+}
+.log-action.view { background: var(--blue-soft); color: var(--blue); }
+.log-action.create { background: var(--green-soft); color: var(--green-bright); }
+.log-action.update { background: var(--orange-soft); color: #c36b42; }
+.log-action.delete { background: var(--red-soft); color: var(--red); }
+.log-action.account { background: #eee9f7; color: #6b5aa0; }
+.log-action.login, .log-action.logout { background: #f0f1ef; color: #7c8580; }
+
+/* 账号信息里的四项元数据（浅色卡片，标签必须用深色） */
+.account-meta.detail-meta-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-top: 0;
+}
+.account-meta.detail-meta-grid > div {
+  background: #f7f8f5; border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px;
+}
+.account-meta.detail-meta-grid span { color: var(--muted); font-size: 9.5px; margin-bottom: 4px; }
+.account-meta.detail-meta-grid strong { color: var(--ink); font-size: 11.5px; font-weight: 600; }

@@ -61,9 +61,30 @@ async function pgInit() {
       payload    JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id         BIGSERIAL PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      actor      TEXT NOT NULL,
+      role       TEXT NOT NULL,
+      action     TEXT NOT NULL,
+      target     TEXT NOT NULL DEFAULT '',
+      detail     TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_company_time ON audit_logs(company_id, created_at DESC);
   `);
+  // 兼容早期版本：补充员工账号相关字段，并把全局唯一用户名改为「公司内唯一」
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_id TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+    ALTER TABLE users ALTER COLUMN username TYPE VARCHAR(32);
+  `);
+  await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key`).catch(() => {});
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_company_username ON users (company_id, lower(username))
+  `).catch(error => console.warn('[store] 用户名唯一索引创建失败：', error.message));
 }
 
 /* ------------------------------------------------------------------ */
@@ -151,7 +172,7 @@ async function createAccount({ company, user, payload }) {
       fileState.users[userId] = {
         id: userId, companyId, username: user.username,
         passwordHash: user.passwordHash, displayName: user.displayName || '管理员',
-        role: 'admin', createdAt: now
+        role: 'admin', staffId: null, status: 'active', createdAt: now
       };
       await writeJsonAtomic(files.accounts, fileState);
       await writeJsonAtomic(tenantFile(companyId), payload);
@@ -232,25 +253,33 @@ async function findSession(token) {
   if (!token) return null;
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT s.token, s.expires_at, u.id AS user_id, u.username, u.display_name, u.role, u.company_id
+      `SELECT s.token, s.expires_at, u.id AS user_id, u.username, u.display_name, u.role,
+              u.company_id, u.staff_id, u.status
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = $1 AND s.expires_at > now()`,
       [token]
     );
     if (!rows[0]) return null;
     const r = rows[0];
+    if (r.status === 'disabled') return null;
     return {
       token: r.token,
-      user: { id: r.user_id, username: r.username, displayName: r.display_name, role: r.role, companyId: r.company_id }
+      user: {
+        id: r.user_id, username: r.username, displayName: r.display_name, role: r.role,
+        companyId: r.company_id, staffId: r.staff_id || null
+      }
     };
   }
   const s = fileState.sessions[token];
   if (!s || new Date(s.expiresAt).getTime() < Date.now()) return null;
   const u = fileState.users[s.userId];
-  if (!u) return null;
+  if (!u || u.status === 'disabled') return null;
   return {
     token,
-    user: { id: u.id, username: u.username, displayName: u.displayName, role: u.role, companyId: u.companyId }
+    user: {
+      id: u.id, username: u.username, displayName: u.displayName, role: u.role,
+      companyId: u.companyId, staffId: u.staffId || null
+    }
   };
 }
 
@@ -295,6 +324,249 @@ async function putTenantData(companyId, payload) {
   await withFileLock(() => writeJsonAtomic(tenantFile(companyId), payload));
 }
 
+/* ------------------------------------------------------------------ */
+/* 成员账号（店长 / 员工）                                             */
+/* ------------------------------------------------------------------ */
+
+const AUDIT_DIR = path.join(DATA_DIR, 'audit');
+const AUDIT_KEEP = 2000;
+
+const mapMember = u => ({
+  id: u.id, companyId: u.companyId, username: u.username, displayName: u.displayName,
+  role: u.role, staffId: u.staffId || null, status: u.status || 'active', createdAt: u.createdAt
+});
+
+async function findCompanyByName(companyName) {
+  const target = String(companyName || '').trim();
+  if (!target) return null;
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id,name FROM companies WHERE lower(name)=lower($1) LIMIT 1`, [target]
+    );
+    return rows[0] || null;
+  }
+  const hit = Object.values(fileState.companies).find(c => String(c.name).toLowerCase() === target.toLowerCase());
+  return hit ? { id: hit.id, name: hit.name } : null;
+}
+
+/** 公司管理员账号（企业登录入口使用） */
+async function findCompanyAdmin(companyName) {
+  const company = await findCompanyByName(companyName);
+  if (!company) return null;
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status
+         FROM users WHERE company_id=$1 AND role='admin' ORDER BY created_at ASC LIMIT 1`, [company.id]
+    );
+    if (!rows[0]) return null;
+    return {
+      id: rows[0].id, companyId: rows[0].company_id, username: rows[0].username,
+      passwordHash: rows[0].password_hash, displayName: rows[0].display_name,
+      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status
+    };
+  }
+  const hit = Object.values(fileState.users)
+    .filter(u => u.companyId === company.id && u.role === 'admin')
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+  return hit ? { ...hit, status: hit.status || 'active' } : null;
+}
+
+/** 公司内按账号查找成员（员工登录入口使用） */
+async function findCompanyMember(companyId, username) {
+  const name = String(username || '').trim();
+  if (!companyId || !name) return null;
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status
+         FROM users WHERE company_id=$1 AND lower(username)=lower($2) LIMIT 1`, [companyId, name]
+    );
+    if (!rows[0]) return null;
+    return {
+      id: rows[0].id, companyId: rows[0].company_id, username: rows[0].username,
+      passwordHash: rows[0].password_hash, displayName: rows[0].display_name,
+      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status
+    };
+  }
+  const hit = Object.values(fileState.users)
+    .find(u => u.companyId === companyId && u.username.toLowerCase() === name.toLowerCase());
+  return hit ? { ...hit, status: hit.status || 'active' } : null;
+}
+
+async function listMembers(companyId) {
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id, company_id, username, display_name, role, staff_id, status, created_at
+         FROM users WHERE company_id=$1 ORDER BY created_at ASC`, [companyId]
+    );
+    return rows.map(r => ({
+      id: r.id, companyId: r.company_id, username: r.username, displayName: r.display_name,
+      role: r.role, staffId: r.staff_id || null, status: r.status, createdAt: r.created_at
+    }));
+  }
+  return Object.values(fileState.users)
+    .filter(u => u.companyId === companyId)
+    .map(mapMember);
+}
+
+async function createMember({ companyId, username, passwordHash, displayName, role, staffId }) {
+  const id = newId('usr');
+  const now = new Date().toISOString();
+  const existed = await findCompanyMember(companyId, username);
+  if (existed) return { error: '该员工账号已存在，请换一个' };
+  if (USE_PG) {
+    await pool.query(
+      `INSERT INTO users (id,company_id,username,password_hash,display_name,role,staff_id,status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active')`,
+      [id, companyId, username, passwordHash, displayName, role, staffId || null]
+    );
+    return { id };
+  }
+  await withFileLock(async () => {
+    fileState.users[id] = {
+      id, companyId, username, passwordHash, displayName, role,
+      staffId: staffId || null, status: 'active', createdAt: now
+    };
+    await writeJsonAtomic(files.accounts, fileState);
+  });
+  return { id };
+}
+
+async function updateMember(companyId, memberId, patch = {}) {
+  const sets = [];
+  const values = [];
+  if (USE_PG) {
+    let i = 1;
+    if (patch.passwordHash) { sets.push(`password_hash=$${i++}`); values.push(patch.passwordHash); }
+    if (patch.displayName !== undefined) { sets.push(`display_name=$${i++}`); values.push(patch.displayName); }
+    if (patch.role) { sets.push(`role=$${i++}`); values.push(patch.role); }
+    if (patch.staffId !== undefined) { sets.push(`staff_id=$${i++}`); values.push(patch.staffId || null); }
+    if (patch.status) { sets.push(`status=$${i++}`); values.push(patch.status); }
+    if (!sets.length) return;
+    values.push(memberId, companyId);
+    await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${i++} AND company_id=$${i}`, values);
+    // 停用账号时同时清掉已登录会话
+    if (patch.status === 'disabled' || patch.passwordHash) {
+      await pool.query(`DELETE FROM sessions WHERE user_id=$1`, [memberId]);
+    }
+    return;
+  }
+  await withFileLock(async () => {
+    const u = fileState.users[memberId];
+    if (!u || u.companyId !== companyId) return;
+    if (patch.passwordHash) u.passwordHash = patch.passwordHash;
+    if (patch.displayName !== undefined) u.displayName = patch.displayName;
+    if (patch.role) u.role = patch.role;
+    if (patch.staffId !== undefined) u.staffId = patch.staffId || null;
+    if (patch.status) u.status = patch.status;
+    if (patch.status === 'disabled' || patch.passwordHash) {
+      for (const [token, s] of Object.entries(fileState.sessions)) {
+        if (s.userId === memberId) delete fileState.sessions[token];
+      }
+    }
+    await writeJsonAtomic(files.accounts, fileState);
+  });
+}
+
+async function deleteMember(companyId, memberId) {
+  if (USE_PG) {
+    await pool.query(`DELETE FROM users WHERE id=$1 AND company_id=$2 AND role<>'admin'`, [memberId, companyId]);
+    return;
+  }
+  await withFileLock(async () => {
+    const u = fileState.users[memberId];
+    if (!u || u.companyId !== companyId || u.role === 'admin') return;
+    delete fileState.users[memberId];
+    for (const [token, s] of Object.entries(fileState.sessions)) {
+      if (s.userId === memberId) delete fileState.sessions[token];
+    }
+    await writeJsonAtomic(files.accounts, fileState);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* 操作记录（审计日志）                                                */
+/* ------------------------------------------------------------------ */
+
+const auditFile = companyId => path.join(AUDIT_DIR, `${companyId}.json`);
+
+async function addAuditLogs(companyId, entries) {
+  const rows = (Array.isArray(entries) ? entries : []).slice(0, 50).map(e => ({
+    actor: String(e.actor || '未知').slice(0, 40),
+    role: String(e.role || 'staff').slice(0, 16),
+    action: String(e.action || 'view').slice(0, 16),
+    target: String(e.target || '').slice(0, 120),
+    detail: String(e.detail || '').slice(0, 240),
+    at: new Date().toISOString()
+  }));
+  if (!rows.length) return;
+  if (USE_PG) {
+    const values = [];
+    const spots = rows.map((r, i) => {
+      const b = i * 6;
+      values.push(companyId, r.actor, r.role, r.action, r.target, r.detail);
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`;
+    });
+    await pool.query(
+      `INSERT INTO audit_logs (company_id,actor,role,action,target,detail) VALUES ${spots.join(',')}`,
+      values
+    );
+    return;
+  }
+  await withFileLock(async () => {
+    await fsp.mkdir(AUDIT_DIR, { recursive: true });
+    let list = [];
+    try { list = JSON.parse(await fsp.readFile(auditFile(companyId), 'utf8')); } catch (e) { list = []; }
+    if (!Array.isArray(list)) list = [];
+    list.push(...rows);
+    if (list.length > AUDIT_KEEP) list = list.slice(-AUDIT_KEEP);
+    await writeJsonAtomic(auditFile(companyId), list);
+  });
+}
+
+async function listAuditLogs(companyId, { limit = 200, action = '', keyword = '' } = {}) {
+  const max = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  let list = [];
+  if (USE_PG) {
+    const cond = ['company_id=$1'];
+    const values = [companyId];
+    if (action) { values.push(action); cond.push(`action=$${values.length}`); }
+    if (keyword) { values.push(`%${keyword}%`); cond.push(`(target ILIKE $${values.length} OR detail ILIKE $${values.length} OR actor ILIKE $${values.length})`); }
+    values.push(max);
+    const { rows } = await pool.query(
+      `SELECT id, actor, role, action, target, detail, created_at FROM audit_logs
+        WHERE ${cond.join(' AND ')} ORDER BY created_at DESC LIMIT $${values.length}`, values
+    );
+    return rows.map(r => ({
+      id: String(r.id), actor: r.actor, role: r.role, action: r.action,
+      target: r.target, detail: r.detail, at: r.created_at
+    }));
+  }
+  try { list = JSON.parse(await fsp.readFile(auditFile(companyId), 'utf8')); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  let rows = [...list].reverse();
+  if (action) rows = rows.filter(r => r.action === action);
+  if (keyword) {
+    const k = String(keyword).toLowerCase();
+    rows = rows.filter(r => `${r.actor}${r.target}${r.detail}`.toLowerCase().includes(k));
+  }
+  return rows.slice(0, max).map((r, i) => ({ ...r, id: `${r.at}-${i}` }));
+}
+
+/** 员工更新自己负责的任务（只允许改状态与进度） */
+async function updateTenantTask(companyId, taskId, patch, actorName) {
+  const data = await getTenantData(companyId);
+  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return { error: 'notfound' };
+  if (String(task.owner) !== String(actorName)) return { error: 'forbidden' };
+  if (patch.status) task.status = patch.status;
+  if (patch.progress !== undefined) task.progress = Math.max(0, Math.min(100, Number(patch.progress) || 0));
+  if (task.status === '已完成') task.progress = 100;
+  data.tasks = tasks;
+  await putTenantData(companyId, data);
+  return { task };
+}
+
 function mapPgUser(r) {
   return {
     id: r.id, companyId: r.company_id, username: r.username,
@@ -306,5 +578,8 @@ module.exports = {
   init, createAccount, findUserByUsername, findUserByCompanyName, getCompany,
   createSession, findSession, deleteSession,
   getTenantData, putTenantData, EMPTY_DB,
+  findCompanyByName, findCompanyAdmin, findCompanyMember,
+  listMembers, createMember, updateMember, deleteMember,
+  addAuditLogs, listAuditLogs, updateTenantTask,
   get driver() { return USE_PG ? 'postgres' : 'file'; }
 };

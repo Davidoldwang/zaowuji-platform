@@ -7,9 +7,9 @@ node_modules/
 data/
 .localdata/
 *.png
-verify.js
-verify-mobile.js
-verify-auth.js
+verify*.js
+shot*.js
 overview.md
 README.md
 css2
+.testdata/

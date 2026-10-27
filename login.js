@@ -1,4 +1,4 @@
-/* 造物集 · 登录与公司注册逻辑 */
+/* 造物集 · 登录、员工登录与公司注册逻辑 */
 (function () {
   'use strict';
 
@@ -60,6 +60,7 @@
 
   function setLoading(form, loading, label) {
     const btn = form.querySelector('.auth-submit');
+    if (!btn) return;
     btn.classList.toggle('loading', loading);
     btn.disabled = loading;
     if (label) btn.querySelector('.label').textContent = label;
@@ -75,51 +76,100 @@
     location.replace(redirectTarget());
   }
 
-  /* ---------------- 标签切换 ---------------- */
-
-  const copy = {
-    login: { title: '欢迎回来', desc: '输入公司名称和密码，进入你所在公司的工作台。' },
-    register: { title: '注册你的公司', desc: '填一个中文公司名称和密码就能开通，名称即登录账号。' }
-  };
-
-  function switchTab(tab) {
-    $$('.auth-tabs button').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-    $('#loginForm').classList.toggle('hidden', tab !== 'login');
-    $('#registerForm').classList.toggle('hidden', tab !== 'register');
-    $('#authTitle').textContent = copy[tab].title;
-    $('#authDesc').textContent = copy[tab].desc;
-    hideAlert();
-    const first = tab === 'login' ? $('#loginUsername') : $('#regCompany');
-    if (first) first.focus();
+  function saveAndEnter(data, message) {
+    writeSession({
+      token: data.token,
+      expiresAt: data.expiresAt,
+      user: data.user,
+      company: data.company
+    });
+    showAlert(message, true);
+    goWorkspace();
   }
 
-  $$('.auth-tabs button').forEach(btn => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-  });
+  /* ---------------- 视图切换：企业登录 / 员工登录 / 注册 ---------------- */
 
-  /* ---------------- 登录 ---------------- */
+  const VIEWS = {
+    company: {
+      title: '企业登录', desc: '用注册时填写的公司名称和密码进入全公司工作台。',
+      form: '#loginForm'
+    },
+    staff: {
+      title: '员工登录', desc: '填写公司名称、管理员开通的员工账号和密码。',
+      form: '#staffForm'
+    },
+    register: {
+      title: '注册你的公司', desc: '填一个中文公司名称和密码就能开通，名称即企业登录账号。',
+      form: '#registerForm'
+    }
+  };
+
+  let view = 'company';
+
+  function switchView(next) {
+    view = next;
+    Object.keys(VIEWS).forEach(key => {
+      const form = $(VIEWS[key].form);
+      if (form) form.classList.toggle('hidden', key !== next);
+    });
+    $('#authTitle').textContent = VIEWS[next].title;
+    $('#authDesc').textContent = VIEWS[next].desc;
+    $('#roleSwitch').classList.toggle('hidden', next === 'register');
+    $$('#roleSwitch button').forEach(btn => btn.classList.toggle('active', btn.dataset.role === next));
+    $('#toRegister').classList.toggle('hidden', next === 'register');
+    $('#toLogin').classList.toggle('hidden', next !== 'register');
+    hideAlert();
+    const firstInput = $(`${VIEWS[next].form} input`);
+    if (firstInput) setTimeout(() => firstInput.focus(), 60);
+  }
+
+  $$('#roleSwitch button').forEach(btn => {
+    btn.addEventListener('click', () => switchView(btn.dataset.role));
+  });
+  $('#toRegister').addEventListener('click', () => switchView('register'));
+  $('#toLogin').addEventListener('click', () => switchView('company'));
+
+  /* ---------------- 企业登录 ---------------- */
 
   $('#loginForm').addEventListener('submit', async event => {
     event.preventDefault();
     hideAlert();
-    const username = $('#loginUsername').value.trim();
+    const companyName = $('#loginCompany').value.trim();
     const password = $('#loginPassword').value;
-    if (!username || !password) return showAlert('请输入公司名称和密码');
+    if (!companyName || !password) return showAlert('请输入公司名称和密码');
 
     setLoading(event.currentTarget, true);
     try {
       const data = await api('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ mode: 'company', companyName, password })
       });
-      writeSession({
-        token: data.token,
-        expiresAt: data.expiresAt,
-        user: data.user,
-        company: data.company
+      saveAndEnter(data, '登录成功，正在进入工作台…');
+    } catch (error) {
+      showAlert(error.message);
+      setLoading(event.currentTarget, false);
+    }
+  });
+
+  /* ---------------- 员工登录 ---------------- */
+
+  $('#staffForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    hideAlert();
+    const companyName = $('#staffCompany').value.trim();
+    const username = $('#staffUsername').value.trim();
+    const password = $('#staffPassword').value;
+    if (!companyName) return showAlert('请填写所属公司名称');
+    if (!username) return showAlert('请填写员工账号');
+    if (!password) return showAlert('请输入密码');
+
+    setLoading(event.currentTarget, true);
+    try {
+      const data = await api('/api/login', {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'staff', companyName, username, password })
       });
-      showAlert('登录成功，正在进入工作台…', true);
-      goWorkspace();
+      saveAndEnter(data, '登录成功，正在进入员工工作台…');
     } catch (error) {
       showAlert(error.message);
       setLoading(event.currentTarget, false);
@@ -147,26 +197,32 @@
         method: 'POST',
         body: JSON.stringify({ companyName, password })
       });
-      writeSession({
-        token: data.token,
-        expiresAt: data.expiresAt,
-        user: data.user,
-        company: data.company
-      });
-      showAlert('公司创建成功，正在进入工作台…', true);
-      goWorkspace();
+      saveAndEnter(data, '公司创建成功，正在进入工作台…');
     } catch (error) {
       showAlert(error.message);
       setLoading(event.currentTarget, false);
     }
   });
 
-  /* ---------------- 已登录则直接进入 ---------------- */
+  /* ---------------- 初始化 ---------------- */
 
   (async function autoEnter() {
+    const params = new URLSearchParams(location.search);
+    // ?switch=1 表示用户主动切换账号：先清掉本地登录状态，停留在登录页
+    if (params.get('switch') === '1') {
+      const session = readSession();
+      if (session && session.token) {
+        api('/api/logout', { method: 'POST' }).catch(() => {});
+      }
+      clearSession();
+      switchView('company');
+      showAlert('已退出原账号，请重新登录');
+      return;
+    }
+
     const session = readSession();
     if (!session || !session.token) {
-      $('#loginUsername').focus();
+      switchView('company');
       return;
     }
     try {
@@ -175,7 +231,7 @@
       goWorkspace();
     } catch (error) {
       clearSession();
-      $('#loginUsername').focus();
+      switchView('company');
     }
   })();
 })();
