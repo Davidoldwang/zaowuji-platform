@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- saved from url=(0059)file:///C:/Users/A/WorkBuddy/2026-10-24-10-46-25/index.html -->
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="造物集文创产品开发进度管理平台">
+  <title>造物集 · 文创产品开发管理平台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=&#39;http://www.w3.org/2000/svg&#39; viewBox=&#39;0 0 64 64&#39;%3E%3Crect width=&#39;64&#39; height=&#39;64&#39; rx=&#39;16&#39; fill=&#39;%2318352d&#39;/%3E%3Ctext x=&#39;32&#39; y=&#39;43&#39; text-anchor=&#39;middle&#39; font-size=&#39;36&#39; fill=&#39;white&#39;%3E%E9%80%A0%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com/">
+  <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+  <link href="./造物集 · 文创产品开发管理平台_files/css2" rel="stylesheet">
+  <link rel="stylesheet" href="./造物集 · 文创产品开发管理平台_files/styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand" data-nav="dashboard">
+        <div class="brand-mark"><span>造</span><i></i></div>
+        <div><strong>造物集</strong><small>文创业务管理平台</small></div>
+      </div>
+      <nav class="main-nav" id="mainNav">
+        <p class="nav-label">工作空间</p>
+        <button class="nav-item active" data-nav="dashboard"><span data-icon="grid"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></svg></span><b>综合看板</b></button>
+        <button class="nav-item" data-nav="projects"><span data-icon="route"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="5" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M7 5h7a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h8"></path><path d="m15 14 3 3-3 3"></path></svg></span><b>开发进度</b><em id="projectNavCount">4</em></button>
+        <button class="nav-item" data-nav="tasks"><span data-icon="check"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"></rect><path d="m7 12 3 3 7-7"></path></svg></span><b>员工工作</b><em class="warm" id="taskNavCount">9</em></button>
+        <p class="nav-label">业务管理</p>
+        <button class="nav-item" data-nav="clients"><span data-icon="users"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span><b>客户管理</b></button>
+        <button class="nav-item" data-nav="products"><span data-icon="box"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 8-9-5-9 5 9 5 9-5Z"></path><path d="m3 8 9 5 9-5M3 8v8l9 5 9-5V8M12 13v8"></path></svg></span><b>产品信息</b></button>
+        <button class="nav-item" data-nav="inventory"><span data-icon="layers"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 17l9 5 9-5"></path></svg></span><b>库存管理</b></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="side-note">
+          <div class="side-note-icon" data-icon="spark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-1.6 4.4L6 9l4.4 1.6L12 15l1.6-4.4L18 9l-4.4-1.6L12 3Z"></path><path d="m5 15-.8 2.2L2 18l2.2.8L5 21l.8-2.2L8 18l-2.2-.8L5 15Z"></path></svg></div>
+          <strong>让好创意，如期发生</strong>
+          <p>项目、产品与团队协作，<br>在一处清晰流转。</p>
+        </div>
+        <button class="profile" id="profileBtn">
+          <span class="avatar">林</span>
+          <span><strong>林然</strong><small>业务管理员</small></span>
+          <i data-icon="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"></circle></svg></i>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" id="menuToggle" aria-label="打开菜单"><span data-icon="menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg></span></button>
+        <div class="global-search">
+          <span data-icon="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></span>
+          <input id="globalSearch" type="search" placeholder="搜索客户、产品或项目…" autocomplete="off">
+          <kbd>⌘ K</kbd>
+          <div class="search-results" id="searchResults"></div>
+        </div>
+        <div class="topbar-actions">
+          <span class="today-label" id="todayLabel">10月24日周六</span>
+          <button class="icon-btn" id="exportBtn" title="导出当前数据"><span data-icon="download"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"></path></svg></span></button>
+          <button class="icon-btn notification-btn" id="notificationBtn" title="节点提醒"><span data-icon="bell"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"></path></svg></span><i id="notificationDot" class="show"></i></button>
+          <button class="primary-btn top-add" id="quickAddBtn"><span data-icon="plus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>新建项目</button>
+        </div>
+      </header>
+      <div class="page-container" id="pageContent"><div class="page-heading"><div><span class="eyebrow">WORKSPACE OVERVIEW</span><h1>把每一个好创意，稳稳落地。</h1><p>项目、产品、协作与经营数据，今天也一目了然。</p></div><div class="heading-actions"><span class="date-chip">数据更新于刚刚</span><button class="secondary-btn" data-action="export" data-type="dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"></path></svg>导出经营简报</button></div></div>
+  <div class="filter-bar"><label class="filter-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input data-filter-search="dashboard" value="" placeholder="快速查询项目、编号或客户…"></label><select class="select-control" data-filter-key="client" data-filter-page="dashboard"><option value="">全部客户</option><option value="c1">江南博物院</option><option value="c2">山海文化集团</option><option value="c3">城市漫游计划</option><option value="c4">敦煌艺术馆</option><option value="c5">拾光书店</option></select><select class="select-control" data-filter-key="product" data-filter-page="dashboard"><option value="">全部产品</option><option value="p1">宋韵四季礼盒</option><option value="p2">汝窑天青茶杯</option><option value="p3">山海经神兽盲盒</option><option value="p4">城市漫步手账</option><option value="p5">敦煌万象丝巾</option><option value="p6">拾光金属冰箱贴</option></select><select class="select-control" data-filter-key="time" data-filter-page="dashboard"><option value="">全部时间</option><option value="7">近 7 天交付</option><option value="30">近 30 天交付</option><option value="90">近 90 天交付</option></select><select class="select-control" data-filter-key="manager" data-filter-page="dashboard"><option value="">全部负责人</option><option value="林然">林然</option><option value="周舟">周舟</option><option value="顾清">顾清</option><option value="江离">江离</option><option value="夏禾">夏禾</option><option value="宋恺">宋恺</option><option value="赵库">赵库</option></select><span class="filter-count" id="filterCount">共 0 条记录</span></div>
+  <section class="stats-grid">
+    <div class="stat-card"><div class="stat-top"><span>进行中项目</span><i class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="5" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M7 5h7a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h8"></path><path d="m15 14 3 3-3 3"></path></svg></i></div><div class="stat-value">4<small>个</small></div><div class="stat-foot"><span class="trend-warm">1 个存在延期</span><span>· 共 5 个项目</span></div></div>
+    <div class="stat-card"><div class="stat-top"><span>累计项目回款</span><i class="stat-icon blue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h14a2 2 0 0 1 2 2v11H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12"></path><path d="M16 11h6v5h-6a2.5 2.5 0 0 1 0-5Z"></path></svg></i></div><div class="stat-value">¥41.1万</div><div class="stat-foot"><span class="trend-up">52%</span><span>合同额 ¥79万</span></div></div>
+    <div class="stat-card"><div class="stat-top"><span>产品实时库存</span><i class="stat-icon orange"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 8-9-5-9 5 9 5 9-5Z"></path><path d="m3 8 9 5 9-5M3 8v8l9 5 9-5V8M12 13v8"></path></svg></i></div><div class="stat-value">3,918<small>件</small></div><div class="stat-foot"><span class="trend-warm">1 款低于安全库存</span></div></div>
+    <div class="stat-card"><div class="stat-top"><span>团队待办任务</span><i class="stat-icon red"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"></rect><path d="m7 12 3 3 7-7"></path></svg></i></div><div class="stat-value">9<small>项</small></div><div class="stat-foot"><span class="trend-warm">4 项临近截止</span><span>· 今日需关注</span></div></div>
+  </section>
+  <div class="dashboard-grid">
+    <section class="card"><div class="card-header"><div class="card-title"><h3>项目推进概览</h3><p>优先关注延期与临近交付项目</p></div><button class="card-link" data-nav="projects">全部项目 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"></path></svg></button></div><div class="table-wrap"><table><thead><tr><th>项目 / 客户</th><th>当前阶段</th><th>整体进度</th><th>负责人</th><th>交付日期</th></tr></thead><tbody><tr data-action="view-project" data-id="j1" style="cursor:pointer"><td><div class="project-cell"><span class="project-code">宋</span><div><span class="cell-main">宋韵四季文创礼盒</span><span class="cell-sub">江南博物院</span></div></div></td><td><span class="badge red">存在延期</span></td><td><div class="progress-cell"><div class="progress-track"><i class="progress-fill orange" style="width:57%"></i></div><span>57%</span></div></td><td><span class="owner"><i class="mini-avatar">林</i>林然</span></td><td><span class="cell-main">11/11</span><span class="cell-sub">剩 18 天</span></td></tr><tr data-action="view-project" data-id="j2" style="cursor:pointer"><td><div class="project-cell"><span class="project-code">山</span><div><span class="cell-main">山海经神兽盲盒系列</span><span class="cell-sub">山海文化集团</span></div></div></td><td><span class="badge gray">包装生产</span></td><td><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:71%"></i></div><span>71%</span></div></td><td><span class="owner"><i class="mini-avatar">周</i>周舟</span></td><td><span class="cell-main">11/03</span><span class="cell-sub">剩 10 天</span></td></tr><tr data-action="view-project" data-id="j3" style="cursor:pointer"><td><div class="project-cell"><span class="project-code">城</span><div><span class="cell-main">城市漫游手账计划</span><span class="cell-sub">城市漫游计划</span></div></div></td><td><span class="badge gray">修改优化</span></td><td><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:29%"></i></div><span>29%</span></div></td><td><span class="owner"><i class="mini-avatar">林</i>林然</span></td><td><span class="cell-main">11/23</span><span class="cell-sub">剩 30 天</span></td></tr><tr data-action="view-project" data-id="j4" style="cursor:pointer"><td><div class="project-cell"><span class="project-code">敦</span><div><span class="cell-main">敦煌万象艺术丝巾</span><span class="cell-sub">敦煌艺术馆</span></div></div></td><td><span class="badge gray">产品设计</span></td><td><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:0%"></i></div><span>0%</span></div></td><td><span class="owner"><i class="mini-avatar">周</i>周舟</span></td><td><span class="cell-main">12/05</span><span class="cell-sub">剩 42 天</span></td></tr></tbody></table></div></section>
+    <section class="card"><div class="card-header"><div class="card-title"><h3>今日聚焦</h3><p>12 个关键节点需要关注</p></div><button class="icon-btn" data-action="open-reminders"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"></circle></svg></button></div><div class="focus-list"><div class="focus-item urgent"><div class="focus-date"><strong>22</strong><small>10月</small></div><div class="focus-info"><strong>宋韵四季文创礼盒 · 产品生产已延期</strong><p>计划 10/22 完成，已延期 2 天 · 负责人 宋恺</p></div></div><div class="focus-item "><div class="focus-date"><strong>25</strong><small>10月</small></div><div class="focus-info"><strong>山海经神兽盲盒系列 · 包装生产</strong><p>1 天后到计划节点 · 负责人 宋恺</p></div></div><div class="focus-item "><div class="focus-date"><strong>26</strong><small>10月</small></div><div class="focus-info"><strong>城市漫游手账计划 · 修改优化</strong><p>2 天后到计划节点 · 负责人 顾清</p></div></div><div class="focus-item "><div class="focus-date"><strong>27</strong><small>10月</small></div><div class="focus-info"><strong>敦煌万象艺术丝巾 · 产品设计</strong><p>3 天后到计划节点 · 负责人 江离</p></div></div></div><div class="focus-footer"><button class="secondary-btn" data-action="open-reminders">查看全部提醒 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"></path></svg></button></div></section>
+  </div>
+  <div class="dashboard-grid equal">
+    <section class="card"><div class="card-header"><div class="card-title"><h3>产品销售趋势</h3><p>近 6 个月销售额（万元）</p></div><div class="chart-legend"><span><i></i>本年度</span><span><i></i>去年同期</span></div></div><div class="card-body"><div class="sales-chart"><div class="chart-y"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div class="bar-area"><div class="bar-group"><div class="bars"><i class="bar prev" style="height:27%"></i><i class="bar" style="height:32%"></i></div><span class="bar-label">5月</span></div><div class="bar-group"><div class="bars"><i class="bar prev" style="height:36%"></i><i class="bar" style="height:48%"></i></div><span class="bar-label">6月</span></div><div class="bar-group"><div class="bars"><i class="bar prev" style="height:40%"></i><i class="bar" style="height:43%"></i></div><span class="bar-label">7月</span></div><div class="bar-group"><div class="bars"><i class="bar prev" style="height:49%"></i><i class="bar" style="height:66%"></i></div><span class="bar-label">8月</span></div><div class="bar-group"><div class="bars"><i class="bar prev" style="height:52%"></i><i class="bar" style="height:58%"></i></div><span class="bar-label">9月</span></div><div class="bar-group"><div class="bars"><i class="bar prev" style="height:61%"></i><i class="bar" style="height:82%"></i></div><span class="bar-label">10月</span></div></div></div></div></section>
+    <section class="card"><div class="card-header"><div class="card-title"><h3>库存健康度</h3><p>按实时库存与安全库存监测</p></div><button class="card-link" data-nav="inventory">库存明细 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"></path></svg></button></div><div class="inventory-mini-list"><div class="inventory-mini"><div><strong>宋韵四季礼盒</strong><small>ZW-GIFT-001</small></div><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:100%"></i></div></div><div class="stock-number" style="color:var(--ink)">275<small> 件</small><small>库存充足</small></div></div><div class="inventory-mini"><div><strong>汝窑天青茶杯</strong><small>ZW-TEA-002</small></div><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:100%"></i></div></div><div class="stock-number" style="color:var(--ink)">450<small> 件</small><small>库存充足</small></div></div><div class="inventory-mini"><div><strong>山海经神兽盲盒</strong><small>ZW-TOY-003</small></div><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:100%"></i></div></div><div class="stock-number" style="color:var(--ink)">2020<small> 件</small><small>库存充足</small></div></div><div class="inventory-mini"><div><strong>城市漫步手账</strong><small>ZW-BOOK-004</small></div><div class="progress-cell"><div class="progress-track"><i class="progress-fill " style="width:100%"></i></div></div><div class="stock-number" style="color:var(--ink)">740<small> 件</small><small>库存充足</small></div></div></div></section>
+  </div>
+  <div class="dashboard-grid equal">
+    <section class="card"><div class="card-header"><div class="card-title"><h3>回款与开票</h3><p>项目资金流与票据状态</p></div><button class="card-link" data-nav="clients">客户账款 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"></path></svg></button></div><div class="card-body"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:18px"><div><span class="cell-sub">合同总额</span><strong style="font-size:18px">¥79万</strong></div><div><span class="cell-sub">待回款</span><strong style="font-size:18px;color:var(--orange)">¥37.9万</strong></div><div><span class="cell-sub">待开票</span><strong style="font-size:18px">¥14.0万</strong></div></div><div class="progress-track" style="height:8px"><i class="progress-fill" style="width:52%"></i></div><div class="stat-foot" style="justify-content:space-between;margin-top:9px"><span>整体回款率 52%</span><span>3 张已开票</span></div></div></section>
+    <section class="card"><div class="card-header"><div class="card-title"><h3>客户授信使用</h3><p>3 家授信客户</p></div><button class="card-link" data-nav="clients">查看详情 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"></path></svg></button></div><div class="card-body credit-body"><div class="donut"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="48"></circle><circle class="value" cx="60" cy="60" r="48" stroke-dasharray="148.5492537313433 301.6"></circle></svg><div class="donut-text"><strong>49%</strong><small>授信使用率</small></div></div><div class="credit-list"><div class="credit-row"><span>授信总额</span><strong>¥670,000</strong></div><div class="credit-row"><span>已使用额度</span><strong>¥330,000</strong></div><div class="credit-row"><span>剩余可用</span><strong style="color:var(--green)">¥340,000</strong></div><div class="credit-row"><span>风险提示</span><strong style="color:var(--orange)">1 家需关注</strong></div></div></div></section>
+  </div></div>
+    </main>
+  </div>
+
+  <div class="drawer-mask" id="drawerMask"></div>
+  <aside class="notification-drawer" id="notificationDrawer">
+    <div class="drawer-header"><div><span class="eyebrow">REMINDERS</span><h2>关键节点提醒</h2></div><button class="icon-btn" data-close="drawer"><span data-icon="x"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></span></button></div>
+    <div class="reminder-summary" id="reminderSummary"></div>
+    <div class="drawer-content" id="reminderList"></div>
+  </aside>
+
+  <div class="modal-mask" id="modalMask">
+    <section class="modal" id="modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><div><span class="eyebrow" id="modalEyebrow">CREATE</span><h2 id="modalTitle"></h2><p id="modalSubtitle"></p></div><button class="icon-btn" data-close="modal"><span data-icon="x"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></span></button></div>
+      <div id="modalBody"></div>
+    </section>
+  </div>
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="mobile-mask" id="mobileMask"></div>
+  <script src="./造物集 · 文创产品开发管理平台_files/app.js"></script>
+
+
+</body></html>
