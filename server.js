@@ -130,26 +130,21 @@ async function currentSession(req) {
 async function handleRegister(req, res) {
   const body = await readBody(req);
   const companyName = str(body.companyName, 60);
-  const username = str(body.username, 32);
   const password = typeof body.password === 'string' ? body.password : '';
-  const creditCode = str(body.creditCode, 40);
-  const contact = str(body.contact, 30);
-  const phone = str(body.phone, 20);
-  const email = str(body.email, 80);
+  // 公司名称即登录账号：中文、字母、数字、括号等常见写法都可用
+  const username = str(body.username, 32) || companyName;
 
-  if (companyName.length < 2) return fail(res, 400, '请填写公司名称（至少 2 个字符）');
-  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username))
-    return fail(res, 400, '登录账号需为 3-32 位字母、数字、下划线或点');
-  if (password.length < 8) return fail(res, 400, '密码至少 8 位');
-  if (phone && !/^[0-9+\-\s()]{6,20}$/.test(phone)) return fail(res, 400, '联系电话格式不正确');
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, '邮箱格式不正确');
+  if (companyName.length < 2) return fail(res, 400, '请填写公司名称（至少 2 个字）');
+  if (/[\u0000-\u001f]/.test(companyName)) return fail(res, 400, '公司名称含有不支持的字符');
+  if (username.length < 2 || username.length > 32) return fail(res, 400, '公司名称需为 2-32 个字');
+  if (password.length < 6) return fail(res, 400, '密码至少 6 位');
 
   const existing = await store.findUserByUsername(username);
-  if (existing) return fail(res, 409, '该登录账号已被占用，请更换');
+  if (existing) return fail(res, 409, '该公司名称已被注册，请直接登录或换一个名称');
 
   const { companyId, userId } = await store.createAccount({
-    company: { name: companyName, creditCode, contact, phone, email },
-    user: { username, passwordHash: hashPassword(password), displayName: contact || '管理员' },
+    company: { name: companyName },
+    user: { username, passwordHash: hashPassword(password), displayName: '管理员' },
     payload: store.EMPTY_DB()
   });
 
@@ -157,7 +152,7 @@ async function handleRegister(req, res) {
   json(res, 201, {
     token,
     expiresAt,
-    user: { id: userId, username, displayName: contact || '管理员', role: 'admin' },
+    user: { id: userId, username, displayName: '管理员', role: 'admin' },
     company: { id: companyId, name: companyName }
   });
 }
@@ -172,10 +167,12 @@ async function handleLogin(req, res) {
   const key = `${ip}|${username.toLowerCase()}`;
   if (rateHit(key)) return fail(res, 429, '尝试次数过多，请 10 分钟后再试');
 
-  const user = await store.findUserByUsername(username);
+  let user = await store.findUserByUsername(username);
+  // 支持直接用公司名称登录（早期用英文账号注册的公司也能这样进）
+  if (!user) user = await store.findUserByCompanyName(username);
   // 账号不存在时也执行一次同代价校验，避免通过响应时间探测账号
   const ok = verifyPassword(password, user ? user.passwordHash : 'scrypt$00$00');
-  if (!user || !ok) return fail(res, 401, '账号或密码错误');
+  if (!user || !ok) return fail(res, 401, '公司名称或密码不正确');
 
   rateClear(key);
   const company = await store.getCompany(user.companyId);

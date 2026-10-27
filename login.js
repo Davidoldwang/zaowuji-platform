@@ -78,8 +78,8 @@
   /* ---------------- 标签切换 ---------------- */
 
   const copy = {
-    login: { title: '欢迎回来', desc: '使用公司分配的账号登录，进入你所在公司的工作台。' },
-    register: { title: '注册你的公司', desc: '创建公司档案与管理员账号，注册完成后即可录入本公司业务数据。' }
+    login: { title: '欢迎回来', desc: '输入公司名称和密码，进入你所在公司的工作台。' },
+    register: { title: '注册你的公司', desc: '填一个中文公司名称和密码就能开通，名称即登录账号。' }
   };
 
   function switchTab(tab) {
@@ -104,7 +104,7 @@
     hideAlert();
     const username = $('#loginUsername').value.trim();
     const password = $('#loginPassword').value;
-    if (!username || !password) return showAlert('请输入账号和密码');
+    if (!username || !password) return showAlert('请输入公司名称和密码');
 
     setLoading(event.currentTarget, true);
     try {
@@ -132,27 +132,21 @@
     event.preventDefault();
     hideAlert();
 
-    const payload = {
-      companyName: $('#regCompany').value.trim(),
-      creditCode: $('#regCredit').value.trim(),
-      contact: $('#regContact').value.trim(),
-      phone: $('#regPhone').value.trim(),
-      email: $('#regEmail').value.trim(),
-      username: $('#regUsername').value.trim(),
-      password: $('#regPassword').value
-    };
+    const companyName = $('#regCompany').value.trim();
+    const password = $('#regPassword').value;
     const password2 = $('#regPassword2').value;
 
-    if (payload.companyName.length < 2) return showAlert('请填写公司名称');
-    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(payload.username)) {
-      return showAlert('登录账号需为 3-32 位字母、数字、下划线或点');
-    }
-    if (payload.password.length < 8) return showAlert('密码至少 8 位');
-    if (payload.password !== password2) return showAlert('两次输入的密码不一致');
+    if (companyName.length < 2) return showAlert('请填写公司名称（至少 2 个字）');
+    if (companyName.length > 32) return showAlert('公司名称请控制在 32 个字以内');
+    if (password.length < 6) return showAlert('密码至少 6 位');
+    if (password !== password2) return showAlert('两次输入的密码不一致');
 
     setLoading(event.currentTarget, true);
     try {
-      const data = await api('/api/register', { method: 'POST', body: JSON.stringify(payload) });
+      const data = await api('/api/register', {
+        method: 'POST',
+        body: JSON.stringify({ companyName, password })
+      });
       writeSession({
         token: data.token,
         expiresAt: data.expiresAt,

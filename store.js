@@ -172,6 +172,27 @@ async function findUserByUsername(username) {
   return found ? { ...found } : null;
 }
 
+/** 允许用公司名称直接登录：按公司名找到该公司的管理员账号 */
+async function findUserByCompanyName(companyName) {
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.company_id, u.username, u.password_hash, u.display_name, u.role
+         FROM users u JOIN companies c ON c.id = u.company_id
+        WHERE lower(c.name) = lower($1)
+        ORDER BY u.created_at ASC LIMIT 1`,
+      [companyName]
+    );
+    return rows[0] ? mapPgUser(rows[0]) : null;
+  }
+  const target = String(companyName || '').toLowerCase();
+  const company = Object.values(fileState.companies).find(c => String(c.name).toLowerCase() === target);
+  if (!company) return null;
+  const user = Object.values(fileState.users)
+    .filter(u => u.companyId === company.id)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+  return user ? { ...user } : null;
+}
+
 async function getCompany(companyId) {
   if (USE_PG) {
     const { rows } = await pool.query(
@@ -281,7 +302,7 @@ function mapPgUser(r) {
 }
 
 module.exports = {
-  init, createAccount, findUserByUsername, getCompany,
+  init, createAccount, findUserByUsername, findUserByCompanyName, getCompany,
   createSession, findSession, deleteSession,
   getTenantData, putTenantData, EMPTY_DB,
   get driver() { return USE_PG ? 'postgres' : 'file'; }
