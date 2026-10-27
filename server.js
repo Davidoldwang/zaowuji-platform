@@ -206,7 +206,7 @@ async function handleMe(req, res) {
 
 async function handlePutData(req, res, session) {
   const body = await readBody(req);
-  const keys = ['clients', 'products', 'projects', 'tasks', 'movements', 'invoices', 'payments'];
+  const keys = ['clients', 'products', 'projects', 'tasks', 'movements', 'invoices', 'payments', 'staff', 'handovers'];
   for (const key of keys) {
     if (!Array.isArray(body[key])) return fail(res, 400, `数据格式不正确：${key} 应为数组`);
   }

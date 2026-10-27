@@ -267,7 +267,8 @@ async function deleteSession(token) {
 }
 
 const EMPTY_DB = () => ({
-  clients: [], products: [], projects: [], tasks: [], movements: [], invoices: [], payments: []
+  clients: [], products: [], projects: [], tasks: [], movements: [], invoices: [], payments: [],
+  staff: [], handovers: []
 });
 
 async function getTenantData(companyId) {

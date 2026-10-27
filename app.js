@@ -59,6 +59,7 @@ const icons = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
   filter: '<path d="M4 5h16M7 12h10M10 19h4"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  shuffle: '<path d="M4 7h4l8 10h4M4 17h4l2-2.5M15 7h5"/><path d="m17 4 3 3-3 3M17 14l3 3-3 3"/>',
   credit: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/>',
   checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>'
 };
@@ -150,12 +151,22 @@ const seed = {
     {id:'i4',clientId:'c3',projectId:'j3',amount:76000,date:'',number:'',status:'待开票'},
     {id:'i5',clientId:'c1',projectId:'j1',amount:64200,date:'',number:'',status:'待开票'}
   ],
-  payments: []
+  payments: [],
+  staff: [
+    {id:'s1',name:'林然',role:'商务',phone:'138 0000 1122',status:'在职',joinedAt:iso(-420),note:'商务负责人，对接重点客户'},
+    {id:'s2',name:'周舟',role:'商务',phone:'138 0000 2233',status:'在职',joinedAt:iso(-380),note:'负责山海文化集团与渠道客户'},
+    {id:'s3',name:'顾清',role:'设计师',phone:'138 0000 3344',status:'在职',joinedAt:iso(-360),note:'宋韵系列主设'},
+    {id:'s4',name:'江离',role:'设计师',phone:'138 0000 4455',status:'在职',joinedAt:iso(-300),note:'潮玩与丝巾品类设计'},
+    {id:'s5',name:'夏禾',role:'新媒体',phone:'138 0000 5566',status:'在职',joinedAt:iso(-210),note:'内容选题与产品拍摄'},
+    {id:'s6',name:'宋恺',role:'生产',phone:'138 0000 6677',status:'在职',joinedAt:iso(-500),note:'大货生产与包装排期'},
+    {id:'s7',name:'赵库',role:'库管',phone:'138 0000 7788',status:'在职',joinedAt:iso(-450),note:'仓储与出入库经办'}
+  ],
+  handovers: []
 };
 
 /* ---------------- 账号会话与云端数据 ---------------- */
 const SESSION_KEY = 'zwj_session_v1';
-const EMPTY_DB = () => ({clients:[],products:[],projects:[],tasks:[],movements:[],invoices:[],payments:[]});
+const EMPTY_DB = () => ({clients:[],products:[],projects:[],tasks:[],movements:[],invoices:[],payments:[],staff:[],handovers:[]});
 const readSession = () => {
   try { const raw = localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; }
   catch (error) { return null; }
@@ -189,15 +200,34 @@ async function apiFetch(pathname, options = {}) {
   return data;
 }
 
-const normalizeDb = data => ({
-  clients: Array.isArray(data && data.clients) ? data.clients : [],
-  products: Array.isArray(data && data.products) ? data.products : [],
-  projects: Array.isArray(data && data.projects) ? data.projects : [],
-  tasks: Array.isArray(data && data.tasks) ? data.tasks : [],
-  movements: Array.isArray(data && data.movements) ? data.movements : [],
-  invoices: Array.isArray(data && data.invoices) ? data.invoices : [],
-  payments: Array.isArray(data && data.payments) ? data.payments : []
-});
+const normalizeDb = data => {
+  const next = {
+    clients: Array.isArray(data && data.clients) ? data.clients : [],
+    products: Array.isArray(data && data.products) ? data.products : [],
+    projects: Array.isArray(data && data.projects) ? data.projects : [],
+    tasks: Array.isArray(data && data.tasks) ? data.tasks : [],
+    movements: Array.isArray(data && data.movements) ? data.movements : [],
+    invoices: Array.isArray(data && data.invoices) ? data.invoices : [],
+    payments: Array.isArray(data && data.payments) ? data.payments : [],
+    staff: Array.isArray(data && data.staff) ? data.staff : [],
+    handovers: Array.isArray(data && data.handovers) ? data.handovers : []
+  };
+  // 老数据没有员工档案：按任务、项目、流水里出现过的负责人自动建档，避免负责人丢失
+  if (!next.staff.length) {
+    const seen = new Map();
+    const addOwner = (name, role) => {
+      if (!name || seen.has(name)) return;
+      seen.set(name, role || '其他');
+    };
+    next.tasks.forEach(t => addOwner(t.owner, t.role));
+    next.projects.forEach(p => { addOwner(p.manager, '商务'); p.stages.forEach(s => addOwner(s.owner, '')); });
+    next.movements.forEach(m => addOwner(m.operator, '库管'));
+    next.staff = [...seen.entries()].map(([name, role], index) => ({
+      id: `s${index + 1}`, name, role, phone: '', status: '在职', joinedAt: '', note: '由历史数据自动建档'
+    }));
+  }
+  return next;
+};
 
 const isDbEmpty = () => ['clients','products','projects','tasks','movements','invoices'].every(key => !db[key].length);
 
@@ -264,10 +294,47 @@ const projectProgress = p => Math.round(p.stages.filter(s=>s.status==='已完成
 const projectDelayed = p => p.status !== '已完成' && p.stages.some(s=>s.status!=='已完成' && daysFromToday(s.plan)<0);
 const projectStatus = p => p.status === '已完成' ? '已完成' : projectDelayed(p) ? '存在延期' : '进行中';
 const currentStage = p => p.stages.find(s=>s.status!=='已完成') || p.stages[p.stages.length-1];
-const ownerOptions = ['林然','周舟','顾清','江离','夏禾','宋恺','赵库'];
-const roleOptions = ['商务','设计师','新媒体','库管'];
+const roleOptions = ['商务','设计师','新媒体','库管','生产','其他'];
+const staffList = () => db.staff.filter(s => s.status !== '停用');
+const staffNames = () => {
+  const set = new Set(staffList().map(s => s.name));
+  // 兼容历史数据中未建档的负责人，保证下拉框不丢人
+  db.tasks.forEach(t => { if (t.owner) set.add(t.owner); });
+  db.projects.forEach(p => { if (p.manager) set.add(p.manager); p.stages.forEach(s => { if (s.owner) set.add(s.owner); }); });
+  return [...set];
+};
+const staffOwnerOptions = () => staffNames();
+const staffByName = name => db.staff.find(s => s.name === name);
+const staffById = id => db.staff.find(s => s.id === id);
+/** 员工改名时，把任务、项目、节点、流水里的负责人一起改掉 */
+const renameOwner = (from, to) => {
+  db.tasks.forEach(t => { if (t.owner === from) t.owner = to; });
+  db.projects.forEach(p => { if (p.manager === from) p.manager = to; p.stages.forEach(s => { if (s.owner === from) s.owner = to; }); });
+  db.movements.forEach(m => { if (m.operator === from) m.operator = to; });
+};
+/** 某位员工当前手头的工作：未完成任务、未完成项目节点、在管项目 */
+const staffWorkload = name => {
+  const tasks = db.tasks.filter(t => t.owner === name && t.status !== '已完成');
+  const stages = [];
+  db.projects.filter(p => p.status !== '已完成').forEach(p => {
+    p.stages.forEach((s, index) => {
+      if (s.owner === name && s.status !== '已完成') stages.push({ project: p, stage: s, index });
+    });
+  });
+  const managed = db.projects.filter(p => p.manager === name && p.status !== '已完成');
+  const overdue = tasks.filter(t => daysFromToday(t.due) < 0).length;
+  return { tasks, stages, managed, overdue, total: tasks.length + stages.length + managed.length };
+};
+/** 当前登录人对应的员工档案，用于「我的工作」视图 */
+const currentStaffName = () => {
+  const display = (session && session.user && (session.user.displayName || session.user.username)) || '';
+  const hit = db.staff.find(s => s.name === display);
+  if (hit) return hit.name;
+  const first = staffList()[0];
+  return first ? first.name : display;
+};
 const statusBadge = status => {
-  const map = {'已完成':'green','进行中':'blue','存在延期':'red','延期':'red','未开始':'gray','待开始':'gray','已开票':'green','待开票':'orange','低库存':'red','充足':'green'};
+  const map = {'已完成':'green','进行中':'blue','存在延期':'red','延期':'red','未开始':'gray','待开始':'gray','已开票':'green','待开票':'orange','低库存':'red','充足':'green','在职':'green','停用':'gray'};
   return `<span class="badge ${map[status]||'gray'}">${esc(status)}</span>`;
 };
 const ownerHtml = name => `<span class="owner"><i class="mini-avatar">${esc(name.slice(0,1))}</i>${esc(name)}</span>`;
@@ -336,7 +403,7 @@ function renderDashboard() {
   const welcome = isDbEmpty() ? `<section class="welcome-panel"><div><span class="eyebrow">GET STARTED</span><h2>这家公司还没有业务数据</h2><p>先到「客户管理」建一条客户，再新建项目；也可以载入一套示例数据，熟悉流程后再清空重录。</p></div><div class="welcome-actions"><button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button><button class="secondary-btn" data-action="load-demo">${icon('spark')}载入示例数据</button></div></section>` : '';
   return `${pageHeading('WORKSPACE OVERVIEW','把每一个好创意，稳稳落地。','项目、产品、协作与经营数据，今天也一目了然。',`<span class="date-chip">数据更新于刚刚</span><button class="secondary-btn" data-action="export" data-type="dashboard">${icon('download')}导出经营简报</button>`)}
   ${welcome}
-  ${filterBar('dashboard','快速查询项目、编号或客户…',selectFilter('dashboard','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('dashboard','product',db.products.map(p=>[p.id,p.name]),f.product)+selectFilter('dashboard','time',[['7','近 7 天交付'],['30','近 30 天交付'],['90','近 90 天交付']],f.time)+selectFilter('dashboard','manager',ownerOptions,f.manager))}
+  ${filterBar('dashboard','快速查询项目、编号或客户…',selectFilter('dashboard','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('dashboard','product',db.products.map(p=>[p.id,p.name]),f.product)+selectFilter('dashboard','time',[['7','近 7 天交付'],['30','近 30 天交付'],['90','近 90 天交付']],f.time)+selectFilter('dashboard','manager',staffOwnerOptions(),f.manager))}
   <section class="stats-grid">
     <div class="stat-card"><div class="stat-top"><span>进行中项目</span><i class="stat-icon">${icon('route')}</i></div><div class="stat-value">${active.length}<small>个</small></div><div class="stat-foot"><span class="trend-warm">${active.filter(projectDelayed).length} 个存在延期</span><span>· 共 ${scopedProjects.length} 个项目</span></div></div>
     <div class="stat-card"><div class="stat-top"><span>累计项目回款</span><i class="stat-icon blue">${icon('wallet')}</i></div><div class="stat-value">${money(received,true)}</div><div class="stat-foot"><span class="trend-up">${Math.round(paymentRate)}%</span><span>合同额 ${money(contract,true)}</span></div></div>
@@ -384,19 +451,20 @@ function renderProjects() {
   const rows = db.projects.filter(p=>(!f.search||`${p.name}${p.code}${clientById(p.clientId)?.company}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.status||(f.status==='存在延期'?projectDelayed(p):p.status===f.status))&&(!f.manager||p.manager===f.manager)&&(!f.client||p.clientId===f.client));
   return `${pageHeading('DEVELOPMENT PIPELINE','开发进度管理','从设计到交付，七个关键阶段清晰可见，风险节点提前介入。',`<button class="secondary-btn" data-action="export" data-type="projects">${icon('download')}导出</button><button class="primary-btn" data-action="add-project">${icon('plus')}新建项目</button>`)}
   <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>全部项目</span><i class="stat-icon">${icon('route')}</i></div><div class="stat-value">${db.projects.length}<small>个</small></div><div class="stat-foot">${db.projects.filter(p=>p.status==='已完成').length} 个已完成交付</div></div><div class="stat-card"><div class="stat-top"><span>按计划推进</span><i class="stat-icon blue">${icon('checkCircle')}</i></div><div class="stat-value">${db.projects.filter(p=>p.status!=='已完成'&&!projectDelayed(p)).length}<small>个</small></div><div class="stat-foot">关键节点运行正常</div></div><div class="stat-card"><div class="stat-top"><span>存在延期</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.projects.filter(projectDelayed).length}<small>个</small></div><div class="stat-foot">请优先协调相关资源</div></div><div class="stat-card"><div class="stat-top"><span>30 天内交付</span><i class="stat-icon orange">${icon('calendar')}</i></div><div class="stat-value">${db.projects.filter(p=>p.status!=='已完成'&&daysFromToday(p.deadline)<=30).length}<small>个</small></div><div class="stat-foot">做好生产与物流衔接</div></div></section>
-  ${filterBar('projects','搜索项目名称、编号或客户…',selectFilter('projects','status',['进行中','存在延期','已完成'],f.status)+selectFilter('projects','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('projects','manager',ownerOptions,f.manager))}
+  ${filterBar('projects','搜索项目名称、编号或客户…',selectFilter('projects','status',['进行中','存在延期','已完成'],f.status)+selectFilter('projects','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('projects','manager',staffOwnerOptions(),f.manager))}
   <section class="project-grid">${rows.map(p=>`<article class="project-card" data-action="view-project" data-id="${p.id}"><div class="project-card-top"><span class="project-card-code">${esc(p.code)}</span>${statusBadge(projectStatus(p))}</div><h3>${esc(p.name)}</h3><span class="project-client">${icon('building')}${esc(clientById(p.clientId)?.company)}</span><div class="project-stage-preview">${p.stages.map(s=>{const delayed=s.status!=='已完成'&&daysFromToday(s.plan)<0;const cls=s.status==='已完成'?'done':delayed?'delay':s.status==='进行中'?'current':'';return `<div class="stage-dot ${cls}" title="${esc(s.name)} · 计划 ${s.plan}"><i></i><span>${esc(s.name.replace('确认','').replace('优化','').replace('最终',''))}</span></div>`}).join('')}</div><div class="project-progress-line"><span>当前：${esc(currentStage(p).name)}</span><strong>${projectProgress(p)}%</strong></div><div class="progress-track"><i class="progress-fill ${projectDelayed(p)?'orange':''}" style="width:${projectProgress(p)}%"></i></div><div class="project-card-bottom"><span>${ownerHtml(p.manager)}</span><span>${icon('calendar')}${dateShort(p.deadline)} 交付</span></div></article>`).join('')}</section>${!rows.length?emptyState():''}`;
 }
 
 function renderTasks() {
   const f = ui.filters.tasks || {};
+  const me = currentStaffName();
   let rows = db.tasks.filter(t=>(!f.search||`${t.title}${t.owner}${projectById(t.projectId)?.name}`.toLowerCase().includes(f.search.toLowerCase()))&&(!f.role||t.role===f.role)&&(!f.status||t.status===f.status)&&(!f.manager||t.owner===f.manager));
-  if(ui.taskView==='personal') rows=rows.filter(t=>t.owner==='林然');
+  if(ui.taskView==='personal') rows=rows.filter(t=>t.owner===me);
   const completed=db.tasks.filter(t=>t.status==='已完成').length;
   const columns=['待开始','进行中','已完成'];
   return `${pageHeading('TEAM COLLABORATION','员工工作管理','任务与项目自动关联，个人节奏和团队负载同样清楚。',`<div class="segment-control"><button data-action="task-view" data-view="team" class="${ui.taskView==='team'?'active':''}">团队视图</button><button data-action="task-view" data-view="personal" class="${ui.taskView==='personal'?'active':''}">我的工作</button></div><button class="primary-btn" data-action="add-task">${icon('plus')}分配任务</button>`)}
-  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>${ui.taskView==='personal'?'我的任务':'团队任务'}</span><i class="stat-icon">${icon('check')}</i></div><div class="stat-value">${ui.taskView==='personal'?db.tasks.filter(t=>t.owner==='林然').length:db.tasks.length}<small>项</small></div><div class="stat-foot">完成率 ${Math.round(completed/db.tasks.length*100)}%</div></div><div class="stat-card"><div class="stat-top"><span>正在推进</span><i class="stat-icon blue">${icon('clock')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status==='进行中').length}<small>项</small></div><div class="stat-foot">平均进度 ${Math.round(db.tasks.filter(t=>t.status==='进行中').reduce((s,t)=>s+t.progress,0)/Math.max(1,db.tasks.filter(t=>t.status==='进行中').length))}%</div></div><div class="stat-card"><div class="stat-top"><span>临期 / 已逾期</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status!=='已完成'&&daysFromToday(t.due)<=1).length}<small>项</small></div><div class="stat-foot">今日请优先处理</div></div><div class="stat-card"><div class="stat-top"><span>参与成员</span><i class="stat-icon orange">${icon('users')}</i></div><div class="stat-value">${new Set(db.tasks.map(t=>t.owner)).size}<small>人</small></div><div class="stat-foot">覆盖 ${new Set(db.tasks.map(t=>t.role)).size} 类岗位</div></div></section>
-  ${filterBar('tasks','搜索工作内容、负责人或关联项目…',selectFilter('tasks','role',roleOptions,f.role)+selectFilter('tasks','status',columns,f.status)+selectFilter('tasks','manager',ownerOptions,f.manager))}
+  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>${ui.taskView==='personal'?`${esc(me)}的任务`:'团队任务'}</span><i class="stat-icon">${icon('check')}</i></div><div class="stat-value">${ui.taskView==='personal'?db.tasks.filter(t=>t.owner===me).length:db.tasks.length}<small>项</small></div><div class="stat-foot">完成率 ${Math.round(completed/db.tasks.length*100)}%</div></div><div class="stat-card"><div class="stat-top"><span>正在推进</span><i class="stat-icon blue">${icon('clock')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status==='进行中').length}<small>项</small></div><div class="stat-foot">平均进度 ${Math.round(db.tasks.filter(t=>t.status==='进行中').reduce((s,t)=>s+t.progress,0)/Math.max(1,db.tasks.filter(t=>t.status==='进行中').length))}%</div></div><div class="stat-card"><div class="stat-top"><span>临期 / 已逾期</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${db.tasks.filter(t=>t.status!=='已完成'&&daysFromToday(t.due)<=1).length}<small>项</small></div><div class="stat-foot">今日请优先处理</div></div><div class="stat-card"><div class="stat-top"><span>参与成员</span><i class="stat-icon orange">${icon('users')}</i></div><div class="stat-value">${new Set(db.tasks.map(t=>t.owner)).size}<small>人</small></div><div class="stat-foot">覆盖 ${new Set(db.tasks.map(t=>t.role)).size} 类岗位</div></div></section>
+  ${filterBar('tasks','搜索工作内容、负责人或关联项目…',selectFilter('tasks','role',roleOptions,f.role)+selectFilter('tasks','status',columns,f.status)+selectFilter('tasks','manager',staffOwnerOptions(),f.manager))}
   <div class="kanban">${columns.map(col=>{const items=rows.filter(t=>t.status===col);return `<section class="kanban-column ${col==='进行中'?'doing':col==='已完成'?'done':''}"><div class="kanban-header"><strong>${col}</strong><span>${items.length}</span></div>${items.map(t=>{const overdue=t.status!=='已完成'&&daysFromToday(t.due)<0;return `<article class="task-card" data-action="edit-task" data-id="${t.id}"><div class="task-card-top"><span class="role-tag">${esc(t.role)}</span><span class="task-priority">${t.priority==='普通'?'':esc(t.priority)+'优先'}</span></div><h4>${esc(t.title)}</h4><div class="task-project">${icon('route')}${esc(projectById(t.projectId)?.name||'未关联项目')}</div><div class="progress-cell"><div class="progress-track"><i class="progress-fill ${overdue?'orange':''}" style="width:${t.progress}%"></i></div><span>${t.progress}%</span></div><div class="task-card-bottom">${ownerHtml(t.owner)}<span class="task-due ${overdue?'overdue':''}">${icon('calendar')}${overdue?'已逾期':daysFromToday(t.due)===0?'今天截止':dateShort(t.due)}</span></div></article>`}).join('')||'<div class="empty-state" style="padding:30px 10px"><p>暂无任务</p></div>'}</section>`}).join('')}</div>`;
 }
 
@@ -412,11 +480,58 @@ function renderInventory() {
   <section class="table-card" style="border-radius:0 0 13px 13px">${ui.inventoryTab==='stock'?`<div class="table-wrap"><table><thead><tr><th>产品编号 / 名称</th><th>类型</th><th>零售价</th><th>综合成本价</th><th>折扣率</th><th>实时库存</th><th>安全库存</th><th>库存状态</th><th>快捷操作</th></tr></thead><tbody>${stockRows.map(p=>{const stock=stockOf(p.id),low=stock<=p.minStock;return `<tr><td><span class="cell-sub" style="margin:0 0 4px;color:var(--green)">${esc(p.code)}</span><span class="cell-main">${esc(p.name)}</span></td><td>${esc(p.type)}</td><td>${money(p.retail)}</td><td>${money(productCost(p))}</td><td>${Math.round(p.discount*100)}%</td><td><div class="stock-hero ${low?'low':''}"><strong>${stock}</strong><div class="stock-meter"><i style="width:${clamp(stock/(p.minStock*3)*100,3,100)}%"></i></div></div></td><td>${p.minStock} 件</td><td>${statusBadge(low?'低库存':'充足')}</td><td><div class="table-actions"><button data-action="add-movement" data-id="${p.id}" data-type="in" title="入库">${icon('inbound')}</button><button data-action="add-movement" data-id="${p.id}" data-type="out" title="出库">${icon('outbound')}</button></div></td></tr>`}).join('')}</tbody></table></div>${!stockRows.length?emptyState():''}`:`<div class="table-wrap"><table><thead><tr><th>流水类型</th><th>产品编号 / 名称</th><th>数量</th><th>发生时间</th><th>经办人</th><th>关联项目</th><th>备注</th><th>流水号</th></tr></thead><tbody>${movementRows.map(m=>{const p=productById(m.productId);return `<tr><td><span class="movement-type ${m.type}">${icon(m.type==='in'?'inbound':'outbound')}${m.type==='in'?'入库':'出库'}</span></td><td><span class="cell-main">${esc(p?.name)}</span><span class="cell-sub">${esc(p?.code)}</span></td><td><span class="movement-qty">${m.type==='in'?'+':'-'}${m.quantity}</span></td><td>${esc(m.date)}</td><td>${ownerHtml(m.operator)}</td><td>${esc(projectById(m.projectId)?.name||'—')}</td><td>${esc(m.note||'—')}</td><td><span class="cell-sub" style="margin:0">${esc(m.id.toUpperCase())}</span></td></tr>`}).join('')}</tbody></table></div>${!movementRows.length?emptyState():''}`}</section>`;
 }
 
+function renderStaff() {
+  const f = ui.filters.staff || {};
+  const rows = db.staff.filter(s => {
+    const text = `${s.name}${s.role}${s.phone || ''}${s.note || ''}`.toLowerCase();
+    if (f.search && !text.includes(f.search.toLowerCase())) return false;
+    if (f.role && s.role !== f.role) return false;
+    if (f.status === '在职' && s.status === '停用') return false;
+    if (f.status === '停用' && s.status !== '停用') return false;
+    return true;
+  });
+  const active = db.staff.filter(s => s.status !== '停用');
+  const pendingTasks = db.tasks.filter(t => t.status !== '已完成');
+  const overdue = pendingTasks.filter(t => daysFromToday(t.due) < 0).length;
+  const avgLoad = active.length ? (pendingTasks.length / active.length).toFixed(1) : '0';
+  const cards = rows.map(s => {
+    const w = staffWorkload(s.name);
+    const off = s.status === '停用';
+    return `<article class="staff-card ${off ? 'inactive' : ''}">
+      <div class="staff-card-top">
+        <span class="staff-avatar">${esc(s.name.slice(0, 1))}</span>
+        <div class="staff-identity"><h3>${esc(s.name)}</h3><span class="staff-role">${esc(s.role || '未填岗位')}</span></div>
+        ${statusBadge(off ? '停用' : '在职')}
+      </div>
+      <p class="staff-contact">${icon('phone')}${esc(s.phone || '未填联系方式')}</p>
+      ${s.note ? `<p class="staff-note">${esc(s.note)}</p>` : ''}
+      <div class="staff-metrics">
+        <div><strong>${w.tasks.length}</strong><span>待办任务</span></div>
+        <div class="${w.overdue ? 'danger' : ''}"><strong>${w.overdue}</strong><span>已逾期</span></div>
+        <div><strong>${w.stages.length}</strong><span>项目节点</span></div>
+        <div><strong>${w.managed.length}</strong><span>在管项目</span></div>
+      </div>
+      <div class="staff-actions">
+        <button class="secondary-btn small" data-action="handover-staff" data-id="${s.id}">${icon('shuffle')}交接工作</button>
+        <button class="secondary-btn small" data-action="edit-staff" data-id="${s.id}">${icon('edit')}编辑</button>
+        <button class="ghost-btn" data-action="toggle-staff" data-id="${s.id}">${off ? '恢复在职' : '停用'}</button>
+        <button class="ghost-btn danger" data-action="remove-staff" data-id="${s.id}">删除</button>
+      </div>
+    </article>`;
+  }).join('');
+  const logs = db.handovers.slice(0, 6).map(h => `<div class="handover-row"><span class="handover-flow">${esc(h.from)} <i>→</i> ${esc(h.to)}</span><span class="handover-detail">${h.tasks || 0} 项任务 · ${h.stages || 0} 个项目节点${h.removed ? ' · 已同步删除原员工' : ''}</span><span class="handover-date">${esc(h.date)}</span></div>`).join('');
+  return `${pageHeading('TEAM ROSTER','员工管理','维护员工档案，任务与项目节点在这里分配，也能一键交接给同事。',`<button class="secondary-btn" data-action="export" data-type="staff">${icon('download')}导出员工</button><button class="primary-btn" data-action="add-staff">${icon('plus')}新增员工</button>`)}
+  <section class="stats-grid"><div class="stat-card"><div class="stat-top"><span>在职员工</span><i class="stat-icon">${icon('users')}</i></div><div class="stat-value">${active.length}<small>人</small></div><div class="stat-foot">共 ${db.staff.length} 份员工档案</div></div><div class="stat-card"><div class="stat-top"><span>待办任务</span><i class="stat-icon blue">${icon('check')}</i></div><div class="stat-value">${pendingTasks.length}<small>项</small></div><div class="stat-foot">人均 ${avgLoad} 项</div></div><div class="stat-card"><div class="stat-top"><span>逾期任务</span><i class="stat-icon red">${icon('warning')}</i></div><div class="stat-value">${overdue}<small>项</small></div><div class="stat-foot">建议优先交接或调整排期</div></div><div class="stat-card"><div class="stat-top"><span>岗位覆盖</span><i class="stat-icon orange">${icon('layers')}</i></div><div class="stat-value">${new Set(active.map(s => s.role).filter(Boolean)).size}<small>类</small></div><div class="stat-foot">商务 · 设计 · 新媒体 · 库管</div></div></section>
+  ${filterBar('staff','搜索姓名、岗位或联系方式…',selectFilter('staff','role',[...new Set(db.staff.map(s => s.role).filter(Boolean))],f.role)+selectFilter('staff','status',['在职','停用'],f.status))}
+  <section class="staff-grid">${cards || emptyState('暂无员工档案','点右上角「新增员工」建立第一位同事')}</section>
+  <section class="card"><div class="card-header"><div class="card-title"><h3>交接记录</h3><p>最近 6 条工作移交记录，便于追溯</p></div></div><div class="card-body">${logs || '<p class="form-hint">还没有交接记录。员工离职或换岗时，用「交接工作」把任务与节点转给同事。</p>'}</div></section>`;
+}
+
 function render() {
   updateShell();
-  const pages={dashboard:renderDashboard,clients:renderClients,products:renderProducts,projects:renderProjects,tasks:renderTasks,inventory:renderInventory};
+  const pages={dashboard:renderDashboard,clients:renderClients,products:renderProducts,projects:renderProjects,tasks:renderTasks,inventory:renderInventory,staff:renderStaff};
   $('#pageContent').innerHTML=(pages[ui.page]||renderDashboard)();
-  const count=$$('.table-card tbody tr').length + $$('.project-card').length + $$('.task-card').length;
+  const count=$$('.table-card tbody tr').length + $$('.project-card').length + $$('.task-card').length + $$('.staff-card').length;
   if($('#filterCount')) $('#filterCount').textContent=`共 ${count} 条记录`;
   window.scrollTo({top:0,behavior:'instant'});
 }
@@ -498,7 +613,7 @@ function openProjectForm(id) {
   openModal({title:id?'编辑项目':'新建开发项目',subtitle:id?'调整项目基础信息，节点请在项目详情中更新':'创建后自动生成从设计到物流的七个标准阶段',eyebrow:'PROJECT SETUP',wide:true,body:formShell(`
     ${inputField('项目编号','code',p.code,{required:true})}${inputField('项目名称','name',p.name,{required:true})}
     ${selectField('关联客户','clientId',db.clients.map(c=>[c.id,c.company]),p.clientId,{required:true})}${selectField('关联主产品','productId',db.products.map(x=>[x.id,`${x.code} · ${x.name}`]),p.productIds[0],{required:true})}
-    ${selectField('项目负责人','manager',ownerOptions,p.manager)}${inputField('计划交付日期','deadline',p.deadline,{type:'date',required:true})}
+    ${selectField('项目负责人','manager',staffOwnerOptions(),p.manager)}${inputField('计划交付日期','deadline',p.deadline,{type:'date',required:true})}
     ${inputField('项目合同额（元）','amount',p.amount,{type:'number',min:0,required:true})}${inputField('已回款（元）','received',p.received,{type:'number',min:0})}
     ${selectField('项目状态','status',['进行中','已完成'],p.status)}<input type="hidden" name="id" value="${id||''}">`,id?'保存项目':'创建并生成节点')});
 }
@@ -516,15 +631,88 @@ function openProjectDetail(id) {
 function openStageForm(projectId,index) {
   const p=projectById(projectId),s=p?.stages[index];if(!s)return;
   openModal({title:`更新节点 · ${s.name}`,subtitle:`${p.name} / 第 ${Number(index)+1} 阶段`,eyebrow:'MILESTONE UPDATE',body:formShell(`
-    ${inputField('负责人','owner',s.owner,{required:true})}${selectField('完成状态','status',['未开始','进行中','已完成'],s.status)}
+    ${selectField('负责人','owner',staffOwnerOptions(),s.owner,{required:true})}${selectField('完成状态','status',['未开始','进行中','已完成'],s.status)}
     ${inputField('计划完成时间','plan',s.plan,{type:'date',required:true})}${inputField('实际完成时间','actual',s.actual,{type:'date',hint:'未完成时可留空'})}
     <input type="hidden" name="projectId" value="${projectId}"><input type="hidden" name="stageIndex" value="${index}">`,'更新节点')});
+}
+
+function openStaffForm(id) {
+  const s = staffById(id) || {name:'',role:'商务',phone:'',status:'在职',joinedAt:iso(),note:''};
+  openModal({title:id?'编辑员工档案':'新增员工',subtitle:'员工档案用于任务分配、项目节点负责人与工作交接',eyebrow:'STAFF PROFILE',body:formShell(`
+    ${inputField('姓名','name',s.name,{required:true})}${selectField('岗位','role',roleOptions,s.role,{required:true})}
+    ${inputField('联系方式','phone',s.phone,{placeholder:'手机号或内部短号'})}${inputField('入职日期','joinedAt',s.joinedAt,{type:'date'})}
+    ${selectField('在职状态','status',['在职','停用'],s.status)}${inputField('备注','note',s.note,{placeholder:'擅长品类、对接客户等'})}
+    <input type="hidden" name="id" value="${id||''}">`,'保存员工档案')});
+}
+
+function openHandoverForm(id, opts = {}) {
+  const from = staffById(id);
+  if (!from) return;
+  const w = staffWorkload(from.name);
+  if (!w.total && !opts.removeAfter) {
+    toast(`${from.name} 当前没有在办工作，无需交接`);
+    return;
+  }
+  const targets = staffList().filter(s => s.id !== from.id).map(s => [s.name, `${s.name} · ${s.role || '未填岗位'}`]);
+  if (!targets.length) {
+    toast('还没有其他在职员工，请先新增一位接收人', true);
+    openStaffForm();
+    return;
+  }
+  const picks = [];
+  w.tasks.forEach(t => picks.push({
+    value: `task:${t.id}`, label: t.title,
+    meta: `截止 ${t.due} · ${projectById(t.projectId)?.name || '未关联项目'}`, warn: daysFromToday(t.due) < 0
+  }));
+  w.stages.forEach(item => picks.push({
+    value: `stage:${item.project.id}:${item.index}`, label: `${item.project.name} · ${item.stage.name}`,
+    meta: `计划 ${item.stage.plan} 完成`, warn: daysFromToday(item.stage.plan) < 0
+  }));
+  w.managed.forEach(p => picks.push({
+    value: `manager:${p.id}`, label: `${p.name}（项目负责人）`, meta: `${p.code} · 交付 ${p.deadline}`, warn: false
+  }));
+  const removing = Boolean(opts.removeAfter);
+  openModal({
+    title: removing ? `删除员工 · ${from.name}` : `交接工作 · ${from.name}`,
+    subtitle: removing ? '该员工还有在办工作，需先移交给同事再删除' : `${from.name} 名下有 ${w.total} 项在办工作，勾选后移交给接收人`,
+    eyebrow: 'WORK HANDOVER',
+    body: formShell(`
+      <div class="form-group full"><label>接收人<em>*</em></label><select name="to" required>${targets.map(t=>`<option value="${esc(t[0])}">${esc(t[1])}</option>`).join('')}</select><span class="form-hint">交接后，所选任务与项目节点的负责人将立即变更</span></div>
+      <div class="form-group full"><label>选择要移交的工作（${picks.length}）</label>
+        <div class="pick-list">
+          <label class="pick-all"><input type="checkbox" id="pickAll" checked><span>全选 / 取消全选</span></label>
+          ${picks.map(p=>`<label class="pick-row"><input type="checkbox" name="pick" value="${p.value}" checked><span class="pick-text"><strong>${esc(p.label)}</strong><small class="${p.warn?'warn':''}">${esc(p.meta)}</small></span></label>`).join('')}
+        </div>
+      </div>
+      ${inputField('交接说明','note','',{placeholder:'例如：客户对接进展、注意事项'})}
+      <input type="hidden" name="staffId" value="${from.id}">
+      <input type="hidden" name="from" value="${esc(from.name)}">
+      <input type="hidden" name="removeAfter" value="${removing?'1':'0'}">`, removing ? '移交并删除员工' : '确认交接', true)
+  });
+  const all = $('#pickAll');
+  if (all) all.addEventListener('change', () => { $$('#modalBody input[name="pick"]').forEach(cb => { cb.checked = all.checked; }); });
+}
+
+function openStaffRemove(id) {
+  const s = staffById(id);
+  if (!s) return;
+  const w = staffWorkload(s.name);
+  if (w.total > 0) { openHandoverForm(id, {removeAfter:true}); return; }
+  openModal({title:'删除员工',subtitle:`${s.name} · ${s.role || '未填岗位'}`,eyebrow:'REMOVE STAFF',body:`
+    <div class="form-body"><p class="confirm-text">确认删除「${esc(s.name)}」的员工档案？该员工当前没有在办工作，删除后不可恢复。</p></div>
+    <div class="form-footer"><button class="secondary-btn" data-close="modal">取消</button><button class="primary-btn danger" data-action="confirm-remove-staff" data-id="${s.id}">${icon('trash')}确认删除</button></div>`});
+}
+
+function removeStaff(id) {
+  db.staff = db.staff.filter(s => s.id !== id);
+  save(); render();
+  toast('员工档案已删除');
 }
 
 function openTaskForm(id) {
   const t=db.tasks.find(x=>x.id===id)||{title:'',role:'商务',owner:'林然',due:iso(3),progress:0,status:'待开始',projectId:db.projects[0]?.id,priority:'普通'};
   openModal({title:id?'更新工作任务':'分配工作任务',subtitle:'任务将同步到个人视图与关键节点提醒',eyebrow:'TEAM TASK',body:formShell(`
-    ${inputField('工作内容','title',t.title,{required:true,full:true})}${selectField('岗位','role',roleOptions,t.role)}${selectField('负责人','owner',ownerOptions,t.owner)}
+    ${inputField('工作内容','title',t.title,{required:true,full:true})}${selectField('岗位','role',roleOptions,t.role)}${selectField('负责人','owner',staffOwnerOptions(),t.owner)}
     ${selectField('关联项目','projectId',db.projects.map(p=>[p.id,p.name]),t.projectId)}${inputField('截止时间','due',t.due,{type:'date',required:true})}
     ${selectField('任务状态','status',['待开始','进行中','已完成'],t.status)}${inputField('完成进度（%）','progress',t.progress,{type:'number',min:0,max:100,required:true})}
     ${selectField('优先级','priority',['普通','高','紧急'],t.priority)}<input type="hidden" name="id" value="${id||''}">`,id?'保存任务':'分配任务')});
@@ -537,7 +725,7 @@ function openMovementForm(productId,defaultType='in') {
     ${selectField('产品','productId',db.products.map(p=>[p.id,`${p.code} · ${p.name}`]),selected,{required:true,full:true})}
     <div class="stock-available"><span>当前实时可用库存</span><strong id="availableStock">${stockOf(selected)} 件</strong></div>
     ${inputField('数量','quantity',1,{type:'number',min:1,required:true})}${inputField('发生时间','date',iso(),{type:'date',required:true})}
-    ${selectField('经办人','operator',['赵库','林然','周舟','宋恺'],'赵库')}${selectField('关联项目','projectId',[['','不关联项目'],...db.projects.map(p=>[p.id,p.name])],db.movements[0]?.projectId)}
+    ${selectField('经办人','operator',staffOwnerOptions(),staffOwnerOptions().includes('赵库')?'赵库':staffOwnerOptions()[0])}${selectField('关联项目','projectId',[['','不关联项目'],...db.projects.map(p=>[p.id,p.name])],db.movements[0]?.projectId)}
     ${textField('备注','note','')}`,'确认登记')});
 }
 
@@ -598,6 +786,30 @@ function handleSubmit(event) {
     } else if(title==='登记项目回款') {
       numberFields(data,['amount']);const p=projectById(data.projectId);if(p.received+data.amount>p.amount)throw new Error('累计回款不能超过项目合同额');p.received+=data.amount;db.payments.push({id:uid('pay'),projectId:data.projectId,amount:data.amount,date:data.date,note:data.note});toast('回款已登记，看板数据已更新');
       setTimeout(()=>openProjectDetail(p.id),50);
+    } else if(title==='新增员工'||title.startsWith('编辑员工')) {
+      if(db.staff.some(s=>s.name===data.name&&s.id!==data.id)) throw new Error('已存在同名员工，请用不同姓名区分');
+      if(data.id) {
+        const s=staffById(data.id),oldName=s.name;
+        Object.assign(s,data);
+        if(oldName!==data.name) renameOwner(oldName,data.name);
+        toast(oldName!==data.name?'员工档案已更新，相关工作负责人已同步改名':'员工档案已更新');
+      } else { db.staff.push({...data,id:uid('s')}); toast('员工已添加，可在任务与开发节点中分配工作'); }
+    } else if(title.startsWith('交接工作')||title.startsWith('删除员工')) {
+      const picks=new FormData(event.target).getAll('pick');
+      if(!picks.length) throw new Error('请至少勾选一项要移交的工作');
+      const to=data.to,from=data.from;
+      if(!to||to===from) throw new Error('请选择一位其他员工接收工作');
+      let tasks=0,stages=0,managers=0;
+      picks.forEach(item=>{
+        const [kind,a,b]=String(item).split(':');
+        if(kind==='task'){const t=db.tasks.find(x=>x.id===a);if(t&&t.owner===from){t.owner=to;tasks+=1;}}
+        else if(kind==='stage'){const pr=projectById(a),st=pr&&pr.stages[Number(b)];if(st&&st.owner===from){st.owner=to;stages+=1;}}
+        else if(kind==='manager'){const pr=projectById(a);if(pr&&pr.manager===from){pr.manager=to;managers+=1;}}
+      });
+      const removed=data.removeAfter==='1';
+      db.handovers.unshift({id:uid('h'),from,to,date:iso(),tasks,stages,managers,note:data.note||'',removed});
+      if(removed) db.staff=db.staff.filter(s=>s.id!==data.staffId);
+      toast(`已把 ${from} 的 ${tasks} 项任务、${stages} 个项目节点移交给 ${to}${removed?'，并删除原员工档案':''}`);
     }
     save();render();if(!title.startsWith('更新节点')&&title!=='登记项目回款')closeModal();
   } catch(error) { toast(error.message,true); }
@@ -618,6 +830,7 @@ function exportCSV(type) {
   else if(type==='products'){name='产品与成本';rows=[['产品编号','名称','类型','材质','计划数量','设计费','打样费','开模费','采购单价','综合成本','零售价','毛利率','进货数','出货数','实时库存'],...db.products.map(p=>[p.code,p.name,p.type,p.material,p.quantity,p.designFee,p.sampleFee,p.moldFee,p.unitCost,productCost(p).toFixed(2),p.retail,productMargin(p).toFixed(2)+'%',movementTotal(p.id,'in'),movementTotal(p.id,'out'),stockOf(p.id)])];}
   else if(type==='projects'){name='项目开发进度';rows=[['项目编号','项目名称','客户','负责人','合同额','已回款','交付日期','项目状态','整体进度','阶段','计划时间','实际时间','阶段负责人','阶段状态'],...db.projects.flatMap(p=>p.stages.map(s=>[p.code,p.name,clientById(p.clientId)?.company,p.manager,p.amount,p.received,p.deadline,projectStatus(p),projectProgress(p)+'%',s.name,s.plan,s.actual,s.owner,s.status]))];}
   else if(type==='movements'){name='库存出入库流水';rows=[['流水号','类型','产品编号','产品名称','数量','时间','经办人','关联项目','备注'],...db.movements.map(m=>[m.id,m.type==='in'?'入库':'出库',productById(m.productId)?.code,productById(m.productId)?.name,m.quantity,m.date,m.operator,projectById(m.projectId)?.name,m.note])];}
+  else if(type==='staff'){name='员工档案';rows=[['姓名','岗位','联系方式','在职状态','入职日期','待办任务','逾期任务','项目节点','在管项目','备注'],...db.staff.map(s=>{const w=staffWorkload(s.name);return [s.name,s.role,s.phone,s.status,s.joinedAt,w.tasks.length,w.overdue,w.stages.length,w.managed.length,s.note]})];}
   else {name='经营数据简报';rows=[['指标','数值'],['项目总数',db.projects.length],['进行中项目',db.projects.filter(p=>p.status!=='已完成').length],['合同总额',db.projects.reduce((s,p)=>s+p.amount,0)],['累计回款',db.projects.reduce((s,p)=>s+p.received,0)],['实时库存',db.products.reduce((s,p)=>s+stockOf(p.id),0)],['待办任务',db.tasks.filter(t=>t.status!=='已完成').length]];}
   const csv='\ufeff'+rows.map(row=>row.map(cell=>`"${String(cell??'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`造物集_${name}_${iso()}.csv`;a.click();URL.revokeObjectURL(url);toast(`${name}已导出为 CSV 文件`);
@@ -630,7 +843,8 @@ function globalSearch(query) {
   const results=[
     ...db.clients.filter(c=>`${c.company}${c.name}${c.phone}`.toLowerCase().includes(q)).map(c=>({page:'clients',id:c.id,title:c.company,sub:`客户 · ${c.name} · ${c.phone}`,icon:'users'})),
     ...db.products.filter(p=>`${p.name}${p.code}${p.type}`.toLowerCase().includes(q)).map(p=>({page:'products',id:p.id,title:p.name,sub:`产品 · ${p.code} · 库存 ${stockOf(p.id)}`,icon:'box'})),
-    ...db.projects.filter(p=>`${p.name}${p.code}`.toLowerCase().includes(q)).map(p=>({page:'projects',id:p.id,title:p.name,sub:`项目 · ${p.code} · ${projectProgress(p)}%`,icon:'route'}))
+    ...db.projects.filter(p=>`${p.name}${p.code}`.toLowerCase().includes(q)).map(p=>({page:'projects',id:p.id,title:p.name,sub:`项目 · ${p.code} · ${projectProgress(p)}%`,icon:'route'})),
+    ...db.staff.filter(s=>`${s.name}${s.role}${s.phone||''}`.toLowerCase().includes(q)).map(s=>({page:'staff',id:s.id,title:s.name,sub:`员工 · ${s.role||'未填岗位'}${s.phone?` · ${s.phone}`:''}`,icon:'users'}))
   ].slice(0,8);
   box.innerHTML=results.length?results.map(r=>`<button class="search-result" data-action="search-go" data-page="${r.page}" data-id="${r.id}"><span>${icon(r.icon)}</span><div><strong>${esc(r.title)}</strong><small>${esc(r.sub)}</small></div></button>`).join(''):'<div class="search-empty">未找到相关客户、产品或项目</div>';
   box.classList.add('show');
@@ -652,6 +866,12 @@ document.addEventListener('click',event=>{
   if(action==='edit-stage')openStageForm(id,el.dataset.stage);
   if(action==='add-task')openTaskForm();
   if(action==='edit-task')openTaskForm(id);
+  if(action==='add-staff')openStaffForm();
+  if(action==='edit-staff')openStaffForm(id);
+  if(action==='handover-staff')openHandoverForm(id);
+  if(action==='remove-staff')openStaffRemove(id);
+  if(action==='confirm-remove-staff'){removeStaff(id);closeModal();}
+  if(action==='toggle-staff'){const s=staffById(id);if(s){s.status=s.status==='停用'?'在职':'停用';save();render();toast(`${s.name} 已设为${s.status}`);}}
   if(action==='add-movement')openMovementForm(id,el.dataset.type||'in');
   if(action==='add-invoice')openInvoiceForm(id);
   if(action==='add-payment')openPaymentForm(id);
@@ -661,7 +881,7 @@ document.addEventListener('click',event=>{
   if(action==='inventory-tab'){ui.inventoryTab=el.dataset.tab;ui.filters.inventory={};render();}
   if(action==='export')exportCSV(el.dataset.type||ui.page);
   if(action==='reminder-go'){closeDrawer();navigate(el.dataset.page);if(el.dataset.page==='projects')setTimeout(()=>openProjectDetail(id),100);if(el.dataset.page==='clients')setTimeout(()=>openClientDetail(id),100);}
-  if(action==='search-go'){$('#searchResults').classList.remove('show');$('#globalSearch').value='';navigate(el.dataset.page);if(el.dataset.page==='projects')setTimeout(()=>openProjectDetail(id),100);if(el.dataset.page==='clients')setTimeout(()=>openClientDetail(id),100);if(el.dataset.page==='products')setTimeout(()=>openProductForm(id),100);}
+  if(action==='search-go'){$('#searchResults').classList.remove('show');$('#globalSearch').value='';navigate(el.dataset.page);if(el.dataset.page==='projects')setTimeout(()=>openProjectDetail(id),100);if(el.dataset.page==='clients')setTimeout(()=>openClientDetail(id),100);if(el.dataset.page==='products')setTimeout(()=>openProductForm(id),100);if(el.dataset.page==='staff')setTimeout(()=>openStaffForm(id),100);}
 });
 
 document.addEventListener('input',event=>{

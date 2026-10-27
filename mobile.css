@@ -296,7 +296,7 @@ body.mobile-body::before {
   position:fixed; z-index:30; left:50%; bottom:0; transform:translateX(-50%);
   width:100%; max-width:480px; min-height:67px;
   padding:7px 5px calc(7px + env(safe-area-inset-bottom));
-  display:grid; grid-template-columns:repeat(6,1fr);
+  display:grid; grid-template-columns:repeat(7,1fr);
   background:rgba(255,255,255,.94); backdrop-filter:blur(20px);
   border-top:1px solid var(--m-line);
   box-shadow:0 -8px 25px rgba(24,53,45,.04);
@@ -370,3 +370,30 @@ body.mobile-body::before {
 @media (prefers-reduced-motion:reduce) {
   .m-main,.mobile-device { animation:none; transition:none; }
 }
+
+/* ---------- 员工管理（移动端） ---------- */
+.m-staff-list { display:flex; flex-direction:column; gap:10px; padding-bottom:8px; }
+.m-staff-card {
+  background:var(--m-card); border:1px solid var(--m-line); border-radius:14px;
+  padding:13px 14px; display:flex; flex-direction:column; gap:10px;
+}
+.m-staff-card.inactive { opacity:.62; }
+.m-staff-top { display:flex; align-items:center; gap:10px; }
+.m-staff-name { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.m-staff-name strong { font-size:13.5px; font-weight:600; color:var(--m-ink); }
+.m-staff-name small { font-size:10.5px; color:var(--m-muted); }
+.m-staff-load { font-size:10px; color:var(--m-green); background:var(--m-green-soft); padding:3px 8px; border-radius:999px; white-space:nowrap; }
+.m-staff-load.warn { color:#b26a1f; background:#fdf1e2; }
+.m-staff-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; padding:9px 0; border-top:1px solid var(--m-line); border-bottom:1px solid var(--m-line); }
+.m-staff-metrics div { text-align:center; display:flex; flex-direction:column; gap:2px; }
+.m-staff-metrics strong { font-size:14px; font-weight:600; color:var(--m-ink); }
+.m-staff-metrics small { font-size:9px; color:var(--m-muted); }
+.m-staff-metrics .warn strong { color:var(--m-red); }
+.m-staff-actions { display:flex; gap:7px; }
+.m-mini-btn {
+  flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
+  padding:8px 0; border-radius:9px; border:1px solid var(--m-line);
+  background:#fbfbf6; color:var(--m-ink); font-size:11px; font-weight:600;
+}
+.m-mini-btn svg { width:12px; height:12px; }
+.m-mini-btn:active { background:var(--m-green-soft); border-color:rgba(31,90,70,.2); }

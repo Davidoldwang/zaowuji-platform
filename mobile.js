@@ -4,7 +4,7 @@
 'use strict';
 
 const mUi = {
-  search: { projects: '', clients: '', products: '', inventory: '', tasks: '' },
+  search: { projects: '', clients: '', products: '', inventory: '', tasks: '', staff: '' },
   projectStatus: '',
   clientCredit: '',
   productType: '',
@@ -18,7 +18,8 @@ const META = {
   tasks: {label:'员工工作', title:'员工工作', eyebrow:'TEAM TASKS'},
   clients: {label:'客户管理', title:'客户管理', eyebrow:'CLIENT RELATIONSHIP'},
   products: {label:'产品信息', title:'产品信息', eyebrow:'PRODUCT LIBRARY'},
-  inventory: {label:'库存管理', title:'库存管理', eyebrow:'INVENTORY CONTROL'}
+  inventory: {label:'库存管理', title:'库存管理', eyebrow:'INVENTORY CONTROL'},
+  staff: {label:'员工管理', title:'员工管理', eyebrow:'TEAM ROSTER'}
 };
 
 const mEsc = esc;
@@ -250,6 +251,38 @@ function renderMobileInventory() {
     ${tab === 'stock' ? `<div class="m-filter-chips">${['','充足','低库存'].map(s=>mChip(s || '全部库存',mUi.inventoryFilter===s,`data-minventory-filter="${s}"`)).join('')}</div><div class="m-stock-list">${stockList.map(mStockCard).join('') || mEmpty('没有匹配的库存产品')}</div>` : `<div class="m-stock-list">${movements.map(mMovementCard).join('') || mEmpty('暂无出入库流水')}</div>`}`;
 }
 
+function renderMobileStaff() {
+  const active = db.staff.filter(s => s.status !== '停用');
+  const pending = db.tasks.filter(t => t.status !== '已完成');
+  const rows = db.staff;
+  const cards = rows.map(s => {
+    const w = staffWorkload(s.name);
+    const off = s.status === '停用';
+    return `<article class="m-staff-card ${off ? 'inactive' : ''}" data-mcard="staff" data-mtext="${mEsc(`${s.name}${s.role}${s.phone || ''}`.toLowerCase())}">
+      <div class="m-staff-top">
+        ${mAvatar(s.name)}
+        <div class="m-staff-name"><strong>${mEsc(s.name)}</strong><small>${mEsc(s.role || '未填岗位')} · ${off ? '已停用' : '在职'}</small></div>
+        <span class="m-staff-load ${w.overdue ? 'warn' : ''}">${w.tasks.length + w.stages.length} 项在办</span>
+      </div>
+      <div class="m-staff-metrics">
+        <div><strong>${w.tasks.length}</strong><small>待办任务</small></div>
+        <div class="${w.overdue ? 'warn' : ''}"><strong>${w.overdue}</strong><small>已逾期</small></div>
+        <div><strong>${w.stages.length}</strong><small>项目节点</small></div>
+        <div><strong>${w.managed.length}</strong><small>在管项目</small></div>
+      </div>
+      <div class="m-staff-actions">
+        <button class="m-mini-btn" data-action="handover-staff" data-id="${s.id}">${mIcon('shuffle')}交接</button>
+        <button class="m-mini-btn" data-action="edit-staff" data-id="${s.id}">${mIcon('edit')}编辑</button>
+        <button class="m-mini-btn" data-action="toggle-staff" data-id="${s.id}">${off ? '恢复' : '停用'}</button>
+      </div>
+    </article>`;
+  }).join('');
+  return `${mPageHeader('staff', '维护员工档案，任务与项目节点可一键交接给同事', mHeaderAction('add-staff', 'plus', '新增员工'))}
+    ${mSummary([[String(active.length), '在职员工'], [String(pending.length), '待办任务'], [String(new Set(active.map(s => s.role).filter(Boolean)).size), '岗位类别']])}
+    ${mSearch('staff', '搜索姓名、岗位或联系方式')}
+    <div class="m-staff-list">${cards || mEmpty('暂无员工档案')}</div>`;
+}
+
 function updateMobileShell() {
   const meta = META[ui.page] || META.dashboard;
   // 页头副标题优先显示当前公司，便于确认自己在哪家客户的数据里
@@ -272,7 +305,8 @@ function renderMobile() {
     tasks: renderMobileTasks,
     clients: renderMobileClients,
     products: renderMobileProducts,
-    inventory: renderMobileInventory
+    inventory: renderMobileInventory,
+    staff: renderMobileStaff
   };
   $('#pageContent').innerHTML = (pages[ui.page] || renderMobileDashboard)();
   updateMobileShell();
