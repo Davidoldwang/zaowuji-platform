@@ -101,6 +101,10 @@
     register: {
       title: '注册你的公司', desc: '填一个中文公司名称和密码就能开通，名称即企业登录账号。',
       form: '#registerForm'
+    },
+    forgot: {
+      title: '找回密码', desc: '凭注册时绑定的邮箱接收验证码，重置登录密码。',
+      form: '#forgotForm'
     }
   };
 
@@ -114,10 +118,12 @@
     });
     $('#authTitle').textContent = VIEWS[next].title;
     $('#authDesc').textContent = VIEWS[next].desc;
-    $('#roleSwitch').classList.toggle('hidden', next === 'register');
+    const isAuthOnly = next === 'register' || next === 'forgot';
+    $('#roleSwitch').classList.toggle('hidden', isAuthOnly);
     $$('#roleSwitch button').forEach(btn => btn.classList.toggle('active', btn.dataset.role === next));
-    $('#toRegister').classList.toggle('hidden', next === 'register');
-    $('#toLogin').classList.toggle('hidden', next !== 'register');
+    $('#toRegister').classList.toggle('hidden', isAuthOnly);
+    $('#toForgot').classList.toggle('hidden', isAuthOnly);
+    $('#toLogin').classList.toggle('hidden', !isAuthOnly);
     hideAlert();
     const firstInput = $(`${VIEWS[next].form} input`);
     if (firstInput) setTimeout(() => firstInput.focus(), 60);
@@ -128,6 +134,57 @@
   });
   $('#toRegister').addEventListener('click', () => switchView('register'));
   $('#toLogin').addEventListener('click', () => switchView('company'));
+  $('#toForgot').addEventListener('click', () => switchView('forgot'));
+
+  /* 找回密码：企业账号 / 员工账号切换 */
+  let forgotEntry = 'company';
+  $$('#forgotEntry button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      forgotEntry = btn.dataset.forgot;
+      $$('#forgotEntry button').forEach(b => b.classList.toggle('active', b === btn));
+      $('#fgUsernameWrap').classList.toggle('hidden', forgotEntry !== 'staff');
+    });
+  });
+
+  /* 发送验证码 + 60 秒倒计时 */
+  let codeCountdown = 0;
+  async function sendCode() {
+    const companyName = $('#fgCompany').value.trim();
+    const username = $('#fgUsername').value.trim();
+    const email = $('#fgEmail').value.trim();
+    if (!companyName) return showAlert('请填写公司名称');
+    if (forgotEntry === 'staff' && !username) return showAlert('请填写员工账号');
+    if (!email) return showAlert('请填写绑定邮箱');
+    hideAlert();
+    const btn = $('#sendCodeBtn');
+    btn.disabled = true;
+    try {
+      const data = await api('/api/forgot', {
+        method: 'POST',
+        body: JSON.stringify({ entry: forgotEntry, companyName, username, email })
+      });
+      if (data.demoCode) {
+        showAlert(`演示模式：验证码 ${data.demoCode}（10 分钟内有效）`, true);
+      } else if (data.sent) {
+        showAlert('验证码已发送到你的邮箱，请查收（10 分钟内有效）', true);
+      } else {
+        showAlert('如果该邮箱已绑定账号，验证码已发送；未收到请检查邮箱或联系管理员', true);
+      }
+      codeCountdown = 60;
+      tickCode();
+    } catch (error) {
+      showAlert(error.message);
+      btn.disabled = false;
+    }
+  }
+  function tickCode() {
+    const btn = $('#sendCodeBtn');
+    if (codeCountdown <= 0) { btn.disabled = false; btn.textContent = '重新获取'; return; }
+    btn.textContent = `${codeCountdown}s 后重发`;
+    codeCountdown -= 1;
+    setTimeout(tickCode, 1000);
+  }
+  $('#sendCodeBtn').addEventListener('click', sendCode);
 
   /* ---------------- 企业登录 ---------------- */
 
@@ -185,19 +242,50 @@
     const companyName = $('#regCompany').value.trim();
     const password = $('#regPassword').value;
     const password2 = $('#regPassword2').value;
+    const email = $('#regEmail').value.trim();
+    const phone = $('#regPhone').value.trim();
 
     if (companyName.length < 2) return showAlert('请填写公司名称（至少 2 个字）');
     if (companyName.length > 32) return showAlert('公司名称请控制在 32 个字以内');
     if (password.length < 6) return showAlert('密码至少 6 位');
     if (password !== password2) return showAlert('两次输入的密码不一致');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showAlert('邮箱格式不正确');
 
     setLoading(event.currentTarget, true);
     try {
       const data = await api('/api/register', {
         method: 'POST',
-        body: JSON.stringify({ companyName, password })
+        body: JSON.stringify({ companyName, password, email, phone })
       });
       saveAndEnter(data, '公司创建成功，正在进入工作台…');
+    } catch (error) {
+      showAlert(error.message);
+      setLoading(event.currentTarget, false);
+    }
+  });
+
+  /* ---------------- 忘记密码 ---------------- */
+
+  $('#forgotForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    hideAlert();
+    const email = $('#fgEmail').value.trim();
+    const code = $('#fgCode').value.trim();
+    const newPassword = $('#fgNewPassword').value;
+    const newPassword2 = $('#fgNewPassword2').value;
+
+    if (!email || !code) return showAlert('请填写邮箱和验证码');
+    if (newPassword.length < 6) return showAlert('新密码至少 6 位');
+    if (newPassword !== newPassword2) return showAlert('两次输入的新密码不一致');
+
+    setLoading(event.currentTarget, true);
+    try {
+      await api('/api/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ email, code, newPassword })
+      });
+      showAlert('密码已重置，请用新密码登录', true);
+      setTimeout(() => switchView('company'), 1200);
     } catch (error) {
       showAlert(error.message);
       setLoading(event.currentTarget, false);

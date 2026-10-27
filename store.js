@@ -16,8 +16,22 @@ const USE_PG = DATABASE_URL.length > 0;
 let pool = null;          // Postgres 连接池
 let fileState = null;     // 文件模式下的账号数据
 let fileQueue = Promise.resolve(); // 串行化文件写入，避免并发覆盖
+const resetCodes = new Map();      // 找回密码验证码（文件模式，内存态，重启即失效）
 
 const newId = prefix => `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+
+const hashSecret = value => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `scrypt$${salt}$${crypto.scryptSync(String(value), salt, 64).toString('hex')}`;
+};
+const verifySecret = (value, stored) => {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  const [, salt, key] = parts;
+  const candidate = crypto.scryptSync(String(value), salt, 64);
+  const expected = Buffer.from(key, 'hex');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+};
 
 /* ------------------------------------------------------------------ */
 /* Postgres                                                            */
@@ -71,14 +85,27 @@ async function pgInit() {
       detail     TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      contact    TEXT NOT NULL,
+      code_hash  TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      attempts   INT NOT NULL DEFAULT 0,
+      used       BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id);
     CREATE INDEX IF NOT EXISTS idx_audit_company_time ON audit_logs(company_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_resets_contact ON password_resets(contact, created_at DESC);
   `);
   // 兼容早期版本：补充员工账号相关字段，并把全局唯一用户名改为「公司内唯一」
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_id TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
     ALTER TABLE users ALTER COLUMN username TYPE VARCHAR(32);
   `);
   await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key`).catch(() => {});
@@ -148,8 +175,9 @@ async function createAccount({ company, user, payload }) {
           company.phone || null, company.email || null]
       );
       await client.query(
-        `INSERT INTO users (id,company_id,username,password_hash,display_name,role) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [userId, companyId, user.username, user.passwordHash, user.displayName || '管理员', 'admin']
+        `INSERT INTO users (id,company_id,username,password_hash,display_name,role,email,phone) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [userId, companyId, user.username, user.passwordHash, user.displayName || '管理员', 'admin',
+          user.email || null, user.phone || null]
       );
       await client.query(
         `INSERT INTO tenant_data (company_id,payload) VALUES ($1,$2)`,
@@ -172,7 +200,8 @@ async function createAccount({ company, user, payload }) {
       fileState.users[userId] = {
         id: userId, companyId, username: user.username,
         passwordHash: user.passwordHash, displayName: user.displayName || '管理员',
-        role: 'admin', staffId: null, status: 'active', createdAt: now
+        role: 'admin', staffId: null, status: 'active',
+        email: user.email || '', phone: user.phone || '', createdAt: now
       };
       await writeJsonAtomic(files.accounts, fileState);
       await writeJsonAtomic(tenantFile(companyId), payload);
@@ -184,7 +213,7 @@ async function createAccount({ company, user, payload }) {
 async function findUserByUsername(username) {
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT id, company_id, username, password_hash, display_name, role FROM users WHERE lower(username)=lower($1)`,
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status, email, phone FROM users WHERE lower(username)=lower($1)`,
       [username]
     );
     return rows[0] ? mapPgUser(rows[0]) : null;
@@ -197,7 +226,7 @@ async function findUserByUsername(username) {
 async function findUserByCompanyName(companyName) {
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT u.id, u.company_id, u.username, u.password_hash, u.display_name, u.role
+      `SELECT u.id, u.company_id, u.username, u.password_hash, u.display_name, u.role, u.staff_id, u.status, u.email, u.phone
          FROM users u JOIN companies c ON c.id = u.company_id
         WHERE lower(c.name) = lower($1)
         ORDER BY u.created_at ASC LIMIT 1`,
@@ -333,7 +362,8 @@ const AUDIT_KEEP = 2000;
 
 const mapMember = u => ({
   id: u.id, companyId: u.companyId, username: u.username, displayName: u.displayName,
-  role: u.role, staffId: u.staffId || null, status: u.status || 'active', createdAt: u.createdAt
+  role: u.role, staffId: u.staffId || null, status: u.status || 'active',
+  email: u.email || '', phone: u.phone || '', createdAt: u.createdAt
 });
 
 async function findCompanyByName(companyName) {
@@ -355,20 +385,21 @@ async function findCompanyAdmin(companyName) {
   if (!company) return null;
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status, email, phone
          FROM users WHERE company_id=$1 AND role='admin' ORDER BY created_at ASC LIMIT 1`, [company.id]
     );
     if (!rows[0]) return null;
     return {
       id: rows[0].id, companyId: rows[0].company_id, username: rows[0].username,
       passwordHash: rows[0].password_hash, displayName: rows[0].display_name,
-      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status
+      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status,
+      email: rows[0].email || '', phone: rows[0].phone || ''
     };
   }
   const hit = Object.values(fileState.users)
     .filter(u => u.companyId === company.id && u.role === 'admin')
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
-  return hit ? { ...hit, status: hit.status || 'active' } : null;
+  return hit ? { ...hit, status: hit.status || 'active', email: hit.email || '', phone: hit.phone || '' } : null;
 }
 
 /** 公司内按账号查找成员（员工登录入口使用） */
@@ -377,30 +408,32 @@ async function findCompanyMember(companyId, username) {
   if (!companyId || !name) return null;
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status, email, phone
          FROM users WHERE company_id=$1 AND lower(username)=lower($2) LIMIT 1`, [companyId, name]
     );
     if (!rows[0]) return null;
     return {
       id: rows[0].id, companyId: rows[0].company_id, username: rows[0].username,
       passwordHash: rows[0].password_hash, displayName: rows[0].display_name,
-      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status
+      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status,
+      email: rows[0].email || '', phone: rows[0].phone || ''
     };
   }
   const hit = Object.values(fileState.users)
     .find(u => u.companyId === companyId && u.username.toLowerCase() === name.toLowerCase());
-  return hit ? { ...hit, status: hit.status || 'active' } : null;
+  return hit ? { ...hit, status: hit.status || 'active', email: hit.email || '', phone: hit.phone || '' } : null;
 }
 
 async function listMembers(companyId) {
   if (USE_PG) {
     const { rows } = await pool.query(
-      `SELECT id, company_id, username, display_name, role, staff_id, status, created_at
+      `SELECT id, company_id, username, display_name, role, staff_id, status, email, phone, created_at
          FROM users WHERE company_id=$1 ORDER BY created_at ASC`, [companyId]
     );
     return rows.map(r => ({
       id: r.id, companyId: r.company_id, username: r.username, displayName: r.display_name,
-      role: r.role, staffId: r.staff_id || null, status: r.status, createdAt: r.created_at
+      role: r.role, staffId: r.staff_id || null, status: r.status,
+      email: r.email || '', phone: r.phone || '', createdAt: r.created_at
     }));
   }
   return Object.values(fileState.users)
@@ -408,23 +441,24 @@ async function listMembers(companyId) {
     .map(mapMember);
 }
 
-async function createMember({ companyId, username, passwordHash, displayName, role, staffId }) {
+async function createMember({ companyId, username, passwordHash, displayName, role, staffId, email, phone }) {
   const id = newId('usr');
   const now = new Date().toISOString();
   const existed = await findCompanyMember(companyId, username);
   if (existed) return { error: '该员工账号已存在，请换一个' };
   if (USE_PG) {
     await pool.query(
-      `INSERT INTO users (id,company_id,username,password_hash,display_name,role,staff_id,status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'active')`,
-      [id, companyId, username, passwordHash, displayName, role, staffId || null]
+      `INSERT INTO users (id,company_id,username,password_hash,display_name,role,staff_id,status,email,phone)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9)`,
+      [id, companyId, username, passwordHash, displayName, role, staffId || null, email || null, phone || null]
     );
     return { id };
   }
   await withFileLock(async () => {
     fileState.users[id] = {
       id, companyId, username, passwordHash, displayName, role,
-      staffId: staffId || null, status: 'active', createdAt: now
+      staffId: staffId || null, status: 'active',
+      email: email || '', phone: phone || '', createdAt: now
     };
     await writeJsonAtomic(files.accounts, fileState);
   });
@@ -441,6 +475,8 @@ async function updateMember(companyId, memberId, patch = {}) {
     if (patch.role) { sets.push(`role=$${i++}`); values.push(patch.role); }
     if (patch.staffId !== undefined) { sets.push(`staff_id=$${i++}`); values.push(patch.staffId || null); }
     if (patch.status) { sets.push(`status=$${i++}`); values.push(patch.status); }
+    if (patch.email !== undefined) { sets.push(`email=$${i++}`); values.push(patch.email || null); }
+    if (patch.phone !== undefined) { sets.push(`phone=$${i++}`); values.push(patch.phone || null); }
     if (!sets.length) return;
     values.push(memberId, companyId);
     await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${i++} AND company_id=$${i}`, values);
@@ -458,6 +494,8 @@ async function updateMember(companyId, memberId, patch = {}) {
     if (patch.role) u.role = patch.role;
     if (patch.staffId !== undefined) u.staffId = patch.staffId || null;
     if (patch.status) u.status = patch.status;
+    if (patch.email !== undefined) u.email = patch.email || '';
+    if (patch.phone !== undefined) u.phone = patch.phone || '';
     if (patch.status === 'disabled' || patch.passwordHash) {
       for (const [token, s] of Object.entries(fileState.sessions)) {
         if (s.userId === memberId) delete fileState.sessions[token];
@@ -570,8 +608,128 @@ async function updateTenantTask(companyId, taskId, patch, actorName) {
 function mapPgUser(r) {
   return {
     id: r.id, companyId: r.company_id, username: r.username,
-    passwordHash: r.password_hash, displayName: r.display_name, role: r.role
+    passwordHash: r.password_hash, displayName: r.display_name, role: r.role,
+    staffId: r.staff_id || null, status: r.status || 'active',
+    email: r.email || '', phone: r.phone || ''
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 账号自助：读取本人、修改联系方式、修改密码、找回密码验证码           */
+/* ------------------------------------------------------------------ */
+
+async function getUserById(userId) {
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id, company_id, username, password_hash, display_name, role, staff_id, status, email, phone, created_at
+         FROM users WHERE id=$1`, [userId]
+    );
+    if (!rows[0]) return null;
+    return {
+      id: rows[0].id, companyId: rows[0].company_id, username: rows[0].username,
+      passwordHash: rows[0].password_hash, displayName: rows[0].display_name,
+      role: rows[0].role, staffId: rows[0].staff_id || null, status: rows[0].status,
+      email: rows[0].email || '', phone: rows[0].phone || '', createdAt: rows[0].created_at
+    };
+  }
+  const u = fileState.users[userId];
+  return u ? { ...u, status: u.status || 'active', email: u.email || '', phone: u.phone || '' } : null;
+}
+
+async function updateUserProfile(userId, patch = {}) {
+  if (USE_PG) {
+    const sets = [];
+    const values = [];
+    let i = 1;
+    if (patch.email !== undefined) { sets.push(`email=$${i++}`); values.push(patch.email || null); }
+    if (patch.phone !== undefined) { sets.push(`phone=$${i++}`); values.push(patch.phone || null); }
+    if (!sets.length) return;
+    values.push(userId);
+    await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${i}`, values);
+    return;
+  }
+  await withFileLock(async () => {
+    const u = fileState.users[userId];
+    if (!u) return;
+    if (patch.email !== undefined) u.email = patch.email || '';
+    if (patch.phone !== undefined) u.phone = patch.phone || '';
+    await writeJsonAtomic(files.accounts, fileState);
+  });
+}
+
+/** 修改本人密码：更新哈希，并清除该用户除当前会话外的其它登录态 */
+async function changeUserPassword(userId, passwordHash, keepToken) {
+  if (USE_PG) {
+    await pool.query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [passwordHash, userId]);
+    await pool.query(`DELETE FROM sessions WHERE user_id=$1 AND token<>$2`, [userId, keepToken || '']);
+    return;
+  }
+  await withFileLock(async () => {
+    const u = fileState.users[userId];
+    if (!u) return;
+    u.passwordHash = passwordHash;
+    for (const [token, s] of Object.entries(fileState.sessions)) {
+      if (s.userId === userId && token !== keepToken) delete fileState.sessions[token];
+    }
+    await writeJsonAtomic(files.accounts, fileState);
+  });
+}
+
+async function createResetCode(userId, contact) {
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const id = newId('rst');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  if (USE_PG) {
+    await pool.query(`DELETE FROM password_resets WHERE contact=$1`, [contact]);
+    await pool.query(
+      `INSERT INTO password_resets (id,user_id,contact,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5)`,
+      [id, userId, contact, hashSecret(code), expiresAt]
+    );
+    return code;
+  }
+  resetCodes.set(contact, {
+    userId, codeHash: hashSecret(code), expiresAt: expiresAt.toISOString(), attempts: 0, used: false
+  });
+  return code;
+}
+
+async function consumeResetCode(contact, code, newPasswordHash) {
+  if (USE_PG) {
+    const { rows } = await pool.query(
+      `SELECT id, user_id, code_hash, expires_at, attempts, used FROM password_resets WHERE contact=$1`, [contact]
+    );
+    const r = rows[0];
+    if (!r) return { error: '验证码无效，请重新获取' };
+    if (r.used) return { error: '验证码已被使用，请重新获取' };
+    if (new Date(r.expires_at).getTime() < Date.now()) return { error: '验证码已过期，请重新获取' };
+    if (r.attempts >= 5) return { error: '尝试次数过多，请重新获取验证码' };
+    if (!verifySecret(code, r.code_hash)) {
+      await pool.query(`UPDATE password_resets SET attempts=attempts+1 WHERE id=$1`, [r.id]);
+      return { error: '验证码不正确' };
+    }
+    await pool.query(`UPDATE password_resets SET used=true WHERE id=$1`, [r.id]);
+    await pool.query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [newPasswordHash, r.user_id]);
+    await pool.query(`DELETE FROM sessions WHERE user_id=$1`, [r.user_id]);
+    return { ok: true, userId: r.user_id };
+  }
+  const rec = resetCodes.get(contact);
+  if (!rec) return { error: '验证码无效，请重新获取' };
+  if (rec.used) return { error: '验证码已被使用，请重新获取' };
+  if (new Date(rec.expiresAt).getTime() < Date.now()) return { error: '验证码已过期，请重新获取' };
+  if (rec.attempts >= 5) return { error: '尝试次数过多，请重新获取验证码' };
+  if (!verifySecret(code, rec.codeHash)) { rec.attempts += 1; return { error: '验证码不正确' }; }
+  rec.used = true;
+  await withFileLock(async () => {
+    const u = fileState.users[rec.userId];
+    if (u) {
+      u.passwordHash = newPasswordHash;
+      for (const [token, s] of Object.entries(fileState.sessions)) {
+        if (s.userId === rec.userId) delete fileState.sessions[token];
+      }
+      await writeJsonAtomic(files.accounts, fileState);
+    }
+  });
+  return { ok: true, userId: rec.userId };
 }
 
 module.exports = {
@@ -581,5 +739,6 @@ module.exports = {
   findCompanyByName, findCompanyAdmin, findCompanyMember,
   listMembers, createMember, updateMember, deleteMember,
   addAuditLogs, listAuditLogs, updateTenantTask,
+  getUserById, updateUserProfile, changeUserPassword, createResetCode, consumeResetCode,
   get driver() { return USE_PG ? 'postgres' : 'file'; }
 };

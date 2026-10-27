@@ -636,3 +636,14 @@ tbody tr:hover { background: #fbfcfa; }
 }
 .account-meta.detail-meta-grid span { color: var(--muted); font-size: 9.5px; margin-bottom: 4px; }
 .account-meta.detail-meta-grid strong { color: var(--ink); font-size: 11.5px; font-weight: 600; }
+
+/* 账号信息面板：找回邮箱提醒 */
+.account-hint {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 14px; padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--orange-soft);
+  border: 1px solid rgba(223, 119, 73, .22);
+  color: #a35c38; font-size: 11.5px; line-height: 1.6;
+}
+.account-hint svg { width: 14px; height: 14px; flex: none; }

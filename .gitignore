@@ -13,4 +13,4 @@ shot*.js
 Thumbs.db
 data/
 .localdata/
-.testdata/
+.testdata*/

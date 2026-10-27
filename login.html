@@ -91,15 +91,60 @@
             <label for="regPassword2">确认密码 <em>*</em></label>
             <input id="regPassword2" name="password2" type="password" autocomplete="new-password" placeholder="再次输入密码" required>
           </div>
+          <div class="field">
+            <label for="regEmail">找回邮箱</label>
+            <input id="regEmail" name="email" type="email" autocomplete="email" placeholder="用于忘记密码时接收验证码">
+            <small>建议填写，否则忘记密码将无法自助找回。</small>
+          </div>
+          <div class="field">
+            <label for="regPhone">手机号</label>
+            <input id="regPhone" name="phone" type="tel" autocomplete="tel" placeholder="11 位手机号（选填）">
+          </div>
           <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">注册并进入工作台</span></button>
+        </form>
+
+        <form class="auth-form hidden" id="forgotForm" novalidate>
+          <div class="forgot-entry" id="forgotEntry">
+            <button type="button" class="active" data-forgot="company">企业账号</button>
+            <button type="button" data-forgot="staff">员工账号</button>
+          </div>
+          <div class="field">
+            <label for="fgCompany">公司名称 <em>*</em></label>
+            <input id="fgCompany" name="companyName" type="text" autocomplete="organization" placeholder="注册时填写的公司名称" required>
+          </div>
+          <div class="field hidden" id="fgUsernameWrap">
+            <label for="fgUsername">员工账号 <em>*</em></label>
+            <input id="fgUsername" name="username" type="text" autocomplete="username" placeholder="管理员开通的员工账号">
+          </div>
+          <div class="field">
+            <label for="fgEmail">绑定邮箱 <em>*</em></label>
+            <input id="fgEmail" name="email" type="email" autocomplete="email" placeholder="验证码将发送到此邮箱" required>
+          </div>
+          <div class="field">
+            <label for="fgCode">验证码 <em>*</em></label>
+            <div class="code-row">
+              <input id="fgCode" name="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="6 位验证码" required>
+              <button type="button" class="code-btn" id="sendCodeBtn">获取验证码</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fgNewPassword">新密码 <em>*</em></label>
+            <input id="fgNewPassword" name="newPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" required>
+          </div>
+          <div class="field">
+            <label for="fgNewPassword2">确认新密码 <em>*</em></label>
+            <input id="fgNewPassword2" name="newPassword2" type="password" autocomplete="new-password" placeholder="再次输入新密码" required>
+          </div>
+          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">重置密码</span></button>
         </form>
 
         <div class="auth-switch-line">
           <button type="button" id="toRegister">还没有公司账号？<b>立即注册</b></button>
+          <button type="button" id="toForgot" class="hidden">忘记密码？<b>找回密码</b></button>
           <button type="button" id="toLogin" class="hidden">已有账号？<b>返回登录</b></button>
         </div>
 
-        <p class="auth-foot">注册即代表你同意以本公司名义管理平台内的业务数据。<br>忘记密码请联系本公司管理员重置。</p>
+        <p class="auth-foot">注册即代表你同意以本公司名义管理平台内的业务数据。<br>忘记密码可凭注册时绑定的邮箱自助找回。</p>
       </div>
     </main>
   </div>

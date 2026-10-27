@@ -43,6 +43,7 @@ const icons = {
   history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
   shield: '<path d="M12 3 5 6v6c0 4.5 3 7.6 7 9 4-1.4 7-4.5 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M17 4h4v4"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="3"/><path d="m3 6 9 7 9-7"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18"/>',
@@ -363,12 +364,14 @@ function openAccountPanel() {
   const user = (session && session.user) || {};
   const companyName = (session.company && session.company.name) || '未命名公司';
   const roleName = ROLE_LABEL[user.role] || '员工';
+  const email = user.email || '';
+  const phone = user.phone || '';
   const perms = {
     admin: ['查看全部业务数据', '新增 / 修改 / 删除业务数据', '管理员工与登录账号', '查看操作记录'],
     manager: ['查看全部业务数据', '新增 / 修改 / 删除业务数据', '查看操作记录（每次查看与修改都会留痕）', '不含账号管理权限'],
     staff: ['查看业务数据（只读）', '更新自己负责任务的进度与状态', '不含经营数据与员工档案的修改权限']
   }[roleOf()] || [];
-  openModal({title:'账号信息', subtitle:'登录状态、角色权限与退出入口', eyebrow:'ACCOUNT CENTER', body:`
+  openModal({title:'账号信息', subtitle:'登录状态、角色权限、修改密码与退出入口', eyebrow:'ACCOUNT CENTER', body:`
     <div class="account-hero">
       <span class="account-avatar">${esc((user.displayName || user.username || '—').slice(0,1))}</span>
       <div><h3>${esc(user.displayName || user.username || '未登录')}</h3><p>${esc(companyName)} · ${esc(roleName)}</p></div>
@@ -377,15 +380,40 @@ function openAccountPanel() {
     <div class="detail-meta-grid account-meta">
       <div><span>登录入口</span><strong>${esc(ROLE_ENTRY[roleOf()] || '员工入口')}</strong></div>
       <div><span>登录账号</span><strong>${esc(user.username || '—')}</strong></div>
-      <div><span>所属公司</span><strong>${esc(companyName)}</strong></div>
-      <div><span>会话状态</span><strong>已登录</strong></div>
+      <div><span>找回邮箱</span><strong>${esc(email || '未绑定')}</strong></div>
+      <div><span>手机号</span><strong>${esc(phone || '未绑定')}</strong></div>
     </div>
+    ${!email ? `<div class="account-hint">${icon('warning')}尚未绑定找回邮箱，忘记密码时将无法自助找回，可点下方「联系方式」补充。</div>` : ''}
     <div class="detail-section"><h4>当前角色权限</h4><ul class="perm-list">${perms.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></div>
     <div class="form-footer">
-      <button class="secondary-btn" data-close="modal">继续使用</button>
+      <button class="secondary-btn" data-action="change-password">${icon('key')}修改密码</button>
+      <button class="secondary-btn" data-action="edit-contact">${icon('mail')}联系方式</button>
       <button class="secondary-btn" data-action="switch-account">${icon('swap')}切换账号</button>
       <button class="primary-btn danger" data-action="logout-confirm">${icon('logout')}退出登录</button>
     </div>`});
+}
+
+function openChangePassword() {
+  openModal({title:'修改登录密码', subtitle:'修改后其它已登录设备会退出，需重新登录', eyebrow:'SECURITY', body:formShell(`
+    ${inputField('原密码','oldPassword','',{type:'password',required:true,full:true})}
+    ${inputField('新密码（至少 6 位）','newPassword','',{type:'password',required:true,full:true})}
+    ${inputField('确认新密码','newPassword2','',{type:'password',required:true,full:true})}`,'确认修改')});
+}
+
+function openContactForm() {
+  const user = (session && session.user) || {};
+  openModal({title:'修改联系方式', subtitle:'用于忘记密码时接收验证码，请填写常用邮箱', eyebrow:'RECOVERY CONTACT', body:formShell(`
+    ${inputField('找回邮箱','email',user.email||'',{type:'email',full:true,placeholder:'name@company.com'})}
+    ${inputField('手机号（选填）','phone',user.phone||'',{full:true,placeholder:'11 位手机号'})}`,'保存')});
+}
+
+/** 把 /api/me 的返回同步回本地会话，账号面板即时刷新 */
+function patchSessionUser(patch) {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    const s = raw ? JSON.parse(raw) : null;
+    if (s && s.user) { Object.assign(s.user, patch); localStorage.setItem(SESSION_KEY, JSON.stringify(s)); session = s; }
+  } catch (error) { /* ignore */ }
 }
 
 const ui = {page:'dashboard',taskView:'team',inventoryTab:'stock',filters:{},modalDirty:false,
@@ -931,6 +959,8 @@ function openMemberForm(staffId) {
       ${selectField('权限角色','role',[['manager','店长 · 可查看并编辑，操作留痕'],['staff','员工 · 只读 + 更新自己任务']],'staff',{required:true})}
       ${inputField('初始密码','password','',{type:'password',required:true,hint:'至少 6 位，请线下告知本人'})}
       ${inputField('登录显示名','displayName',s.name,{required:true,hint:'任务负责人、交接对象都按这个姓名匹配'})}
+      ${inputField('找回邮箱','email',s.email||'',{type:'email',hint:'用于该员工忘记密码时接收验证码'})}
+      ${inputField('手机号（选填）','phone',s.phone||'',{placeholder:'11 位手机号'})}
       <input type="hidden" name="staffId" value="${s.id}">`, '开通账号')
   });
 }
@@ -1079,22 +1109,34 @@ async function handleSubmit(event) {
   if(!canEdit() && !staffTaskEdit){ toast('当前为只读员工账号，无法修改业务数据', true); return; }
 
   // 账号类表单走独立接口，不写入业务数据
-  if(title.startsWith('开通登录账号')||title.startsWith('重置密码')) {
+  if(title.startsWith('开通登录账号')||title.startsWith('重置密码')||title==='修改登录密码'||title==='修改联系方式') {
     try {
       if(title.startsWith('开通登录账号')) {
         await apiFetch('/api/members',{method:'POST',body:JSON.stringify({
           username:data.username,password:data.password,role:data.role,
-          displayName:data.displayName,staffId:data.staffId
+          displayName:data.displayName,staffId:data.staffId,email:data.email,phone:data.phone
         })});
         await loadMembers();
         closeModal();render();
         toast(`账号 ${data.username} 已开通，可用「员工登录」入口进入`);
-      } else {
+      } else if(title.startsWith('重置密码')) {
         await apiFetch(`/api/members/${encodeURIComponent(data.memberId)}`,{method:'PATCH',body:JSON.stringify({
           password:data.password,username:data.username
         })});
         closeModal();render();
         toast('密码已重置，该账号需重新登录');
+      } else if(title==='修改登录密码') {
+        if(data.newPassword.length<6) throw new Error('新密码至少 6 位');
+        if(data.newPassword!==data.newPassword2) throw new Error('两次输入的新密码不一致');
+        await apiFetch('/api/change-password',{method:'POST',body:JSON.stringify({oldPassword:data.oldPassword,newPassword:data.newPassword})});
+        closeModal();
+        toast('密码已修改，其它设备已退出登录');
+      } else if(title==='修改联系方式') {
+        if(data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) throw new Error('邮箱格式不正确');
+        await apiFetch('/api/me',{method:'PATCH',body:JSON.stringify({email:data.email,phone:data.phone})});
+        patchSessionUser({email:data.email||'',phone:data.phone||''});
+        closeModal();
+        toast('联系方式已更新，找回密码验证码将发送到该邮箱');
       }
     } catch(error){ toast(error.message,true); }
     return;
@@ -1273,6 +1315,8 @@ document.addEventListener('click',event=>{
   if(action==='export')exportCSV(el.dataset.type||ui.page);
   if(action==='reload-logs'){renderLogsReload();}
   if(action==='account-center')openAccountPanel();
+  if(action==='change-password')openChangePassword();
+  if(action==='edit-contact')openContactForm();
   if(action==='switch-account')switchAccount();
   if(action==='logout-confirm')confirmLogout();
   if(action==='confirm-logout')logout();

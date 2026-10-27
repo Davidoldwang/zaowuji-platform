@@ -12,4 +12,4 @@ shot*.js
 overview.md
 README.md
 css2
-.testdata/
+.testdata*/

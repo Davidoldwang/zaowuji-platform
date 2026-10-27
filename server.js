@@ -139,6 +139,34 @@ async function requireSession(req, res, minRank = 1) {
 }
 
 const actorOf = session => session.user.displayName || session.user.username || '未知';
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* 找回密码验证码发送：配置了 SMTP 时发真实邮件，否则降级为演示模式（验证码返回前端显示） */
+const SMTP = {
+  host: process.env.SMTP_HOST || '',
+  port: Number(process.env.SMTP_PORT) || 465,
+  secure: process.env.SMTP_SECURE !== 'false',
+  user: process.env.SMTP_USER || '',
+  pass: process.env.SMTP_PASS || '',
+  from: process.env.SMTP_FROM || ''
+};
+
+async function sendEmail(to, subject, text, html) {
+  if (!SMTP.host || !SMTP.user || !SMTP.pass) return { ok: false, reason: 'not-configured' };
+  let nodemailer;
+  try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, reason: 'nodemailer-missing' }; }
+  try {
+    const transporter = nodemailer.createTransport({
+      host: SMTP.host, port: SMTP.port, secure: SMTP.secure,
+      auth: { user: SMTP.user, pass: SMTP.pass }
+    });
+    await transporter.sendMail({ from: SMTP.from || SMTP.user, to, subject, text, html });
+    return { ok: true };
+  } catch (error) {
+    console.error('[smtp] 发送失败：', error && error.message);
+    return { ok: false, reason: 'smtp-error' };
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* 业务接口                                                            */
@@ -150,18 +178,21 @@ async function handleRegister(req, res) {
   const password = typeof body.password === 'string' ? body.password : '';
   // 公司名称即登录账号：中文、字母、数字、括号等常见写法都可用
   const username = str(body.username, 32) || companyName;
+  const email = str(body.email, 120).toLowerCase();
+  const phone = str(body.phone, 24);
 
   if (companyName.length < 2) return fail(res, 400, '请填写公司名称（至少 2 个字）');
   if (/[\u0000-\u001f]/.test(companyName)) return fail(res, 400, '公司名称含有不支持的字符');
   if (username.length < 2 || username.length > 32) return fail(res, 400, '公司名称需为 2-32 个字');
   if (password.length < 6) return fail(res, 400, '密码至少 6 位');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, '邮箱格式不正确');
 
   const existing = await store.findUserByUsername(username);
   if (existing) return fail(res, 409, '该公司名称已被注册，请直接登录或换一个名称');
 
   const { companyId, userId } = await store.createAccount({
-    company: { name: companyName },
-    user: { username, passwordHash: hashPassword(password), displayName: '管理员' },
+    company: { name: companyName, email, phone },
+    user: { username, passwordHash: hashPassword(password), displayName: '管理员', email, phone },
     payload: store.EMPTY_DB()
   });
 
@@ -169,7 +200,7 @@ async function handleRegister(req, res) {
   json(res, 201, {
     token,
     expiresAt,
-    user: { id: userId, username, displayName: '管理员', role: 'admin' },
+    user: { id: userId, username, displayName: '管理员', role: 'admin', email, phone },
     company: { id: companyId, name: companyName }
   });
 }
@@ -225,7 +256,8 @@ async function handleLogin(req, res) {
     expiresAt,
     user: {
       id: user.id, username: user.username, displayName: user.displayName,
-      role: user.role, staffId: user.staffId || null
+      role: user.role, staffId: user.staffId || null,
+      email: user.email || '', phone: user.phone || ''
     },
     company: company ? { id: company.id, name: company.name } : { id: user.companyId, name: '未命名公司' }
   });
@@ -247,15 +279,110 @@ async function handleLogout(req, res) {
 async function handleMe(req, res) {
   const session = await currentSession(req);
   if (!session) return fail(res, 401, '登录状态已失效，请重新登录');
+  const full = await store.getUserById(session.user.id);
   const company = await store.getCompany(session.user.companyId);
   json(res, 200, {
     user: {
       id: session.user.id, username: session.user.username,
       displayName: session.user.displayName, role: session.user.role,
-      staffId: session.user.staffId || null
+      staffId: session.user.staffId || null,
+      email: (full && full.email) || '', phone: (full && full.phone) || ''
     },
     company: company || { id: session.user.companyId, name: '未命名公司' }
   });
+}
+
+/* -------------------------- 账号自助：改密 / 联系方式 / 找回密码 -------------------------- */
+
+async function handleChangePassword(req, res, session) {
+  const body = await readBody(req);
+  const oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+  if (!oldPassword || !newPassword) return fail(res, 400, '请填写原密码和新密码');
+  if (newPassword.length < 6) return fail(res, 400, '新密码至少 6 位');
+  if (newPassword.length > 72) return fail(res, 400, '新密码过长');
+  const user = await store.getUserById(session.user.id);
+  if (!user || !verifyPassword(oldPassword, user.passwordHash)) return fail(res, 400, '原密码不正确');
+  await store.changeUserPassword(user.id, hashPassword(newPassword), session.token);
+  store.addAuditLogs(user.companyId, [{
+    actor: actorOf(session), role: user.role, action: 'account',
+    target: `账号 · ${user.username}`, detail: '修改登录密码'
+  }]).catch(() => {});
+  json(res, 200, { ok: true });
+}
+
+async function handleUpdateMe(req, res, session) {
+  const body = await readBody(req);
+  const patch = {};
+  if (body.email !== undefined) {
+    const email = str(body.email, 120).toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, '邮箱格式不正确');
+    patch.email = email;
+  }
+  if (body.phone !== undefined) patch.phone = str(body.phone, 24);
+  if (!Object.keys(patch).length) return fail(res, 400, '没有需要更新的内容');
+  await store.updateUserProfile(session.user.id, patch);
+  store.addAuditLogs(session.user.companyId, [{
+    actor: actorOf(session), role: session.user.role, action: 'account',
+    target: `账号 · ${session.user.username}`, detail: '更新找回邮箱 / 手机号'
+  }]).catch(() => {});
+  json(res, 200, { ok: true });
+}
+
+async function handleForgot(req, res) {
+  const body = await readBody(req);
+  const entry = body.entry === 'staff' ? 'staff' : 'company';
+  const companyName = str(body.companyName, 60);
+  const username = str(body.username, 32);
+  const email = str(body.email, 120).toLowerCase();
+
+  if (!companyName) return fail(res, 400, '请填写公司名称');
+  if (!email) return fail(res, 400, '请填写注册时绑定的邮箱');
+  if (entry === 'staff' && !username) return fail(res, 400, '请填写员工账号');
+
+  const ip = req.socket.remoteAddress || 'unknown';
+  if (rateHit(`forgot|${ip}|${email}`)) return fail(res, 429, '请求过于频繁，请稍后再试');
+
+  let user = null;
+  if (entry === 'staff') {
+    const company = await store.findCompanyByName(companyName);
+    if (company) user = await store.findCompanyMember(company.id, username);
+  } else {
+    user = await store.findCompanyAdmin(companyName);
+  }
+
+  let sent = false;
+  let demoCode = null;
+  if (user && user.status !== 'disabled' && String(user.email || '').toLowerCase() === email) {
+    const code = await store.createResetCode(user.id, email);
+    const subject = '造物集 · 找回密码验证码';
+    const text = `【造物集】你的找回密码验证码是 ${code}，10 分钟内有效。如非本人操作请忽略本邮件。`;
+    const html = `<div style="font-family:system-ui,-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei';max-width:480px;margin:0 auto;padding:28px;color:#1f2b26">
+  <div style="font-size:20px;font-weight:700;color:#18352d">造物集 · 找回密码</div>
+  <p style="color:#5a6b62;font-size:14px;line-height:1.8">你正在为「${escapeHtml(companyName)}」的账号找回密码，请输入下面的验证码完成重置：</p>
+  <div style="font-size:30px;font-weight:800;letter-spacing:10px;color:#1f3f34;background:#eef4ef;padding:16px;text-align:center;border-radius:10px;margin:18px 0">${code}</div>
+  <p style="color:#8a978f;font-size:12px;line-height:1.8">验证码 10 分钟内有效，请勿泄露给他人。如非本人操作请忽略本邮件。</p>
+</div>`;
+    const send = await sendEmail(email, subject, text, html);
+    if (send.ok) sent = true;
+    else if (send.reason !== 'smtp-error') demoCode = code;   // 未配置 SMTP 时进入演示模式
+  }
+
+  // 无论账号是否存在都返回成功，避免被用于探测账号
+  json(res, 200, { ok: true, sent, demo: !!(demoCode && !sent), demoCode: demoCode || null });
+}
+
+async function handleResetPassword(req, res) {
+  const body = await readBody(req);
+  const email = str(body.email, 120).toLowerCase();
+  const code = str(body.code, 8);
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+  if (!email || !code) return fail(res, 400, '请填写邮箱和验证码');
+  if (newPassword.length < 6) return fail(res, 400, '新密码至少 6 位');
+  if (newPassword.length > 72) return fail(res, 400, '新密码过长');
+  const result = await store.consumeResetCode(email, code, hashPassword(newPassword));
+  if (result.error) return fail(res, 400, result.error);
+  json(res, 200, { ok: true });
 }
 
 async function handlePutData(req, res, session) {
@@ -289,16 +416,20 @@ async function handleCreateMember(req, res, session) {
   const role = MEMBER_ROLES.includes(body.role) ? body.role : 'staff';
   const displayName = str(body.displayName, 32);
   const staffId = str(body.staffId, 40);
+  const email = str(body.email, 120).toLowerCase();
+  const phone = str(body.phone, 24);
 
   if (!/^[A-Za-z0-9_.-]{2,32}$/.test(username)) {
     return fail(res, 400, '员工账号请用 2-32 位字母、数字、下划线或点');
   }
   if (password.length < 6) return fail(res, 400, '初始密码至少 6 位');
   if (!displayName) return fail(res, 400, '请填写员工姓名');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, '邮箱格式不正确');
 
   const result = await store.createMember({
     companyId: session.user.companyId, username,
-    passwordHash: hashPassword(password), displayName, role, staffId: staffId || null
+    passwordHash: hashPassword(password), displayName, role,
+    staffId: staffId || null, email, phone
   });
   if (result.error) return fail(res, 409, result.error);
   store.addAuditLogs(session.user.companyId, [{
@@ -319,6 +450,12 @@ async function handleUpdateMember(req, res, session, memberId) {
   if (body.status === 'active' || body.status === 'disabled') patch.status = body.status;
   if (body.displayName !== undefined) patch.displayName = str(body.displayName, 32);
   if (body.staffId !== undefined) patch.staffId = str(body.staffId, 40);
+  if (body.email !== undefined) {
+    const email = str(body.email, 120).toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, '邮箱格式不正确');
+    patch.email = email;
+  }
+  if (body.phone !== undefined) patch.phone = str(body.phone, 24);
   if (!Object.keys(patch).length) return fail(res, 400, '没有需要更新的内容');
 
   await store.updateMember(session.user.companyId, memberId, patch);
@@ -429,6 +566,18 @@ const server = http.createServer(async (req, res) => {
       if (route === 'POST /api/login') return await handleLogin(req, res);
       if (route === 'POST /api/logout') return await handleLogout(req, res);
       if (route === 'GET /api/me') return await handleMe(req, res);
+      if (route === 'POST /api/forgot') return await handleForgot(req, res);
+      if (route === 'POST /api/reset-password') return await handleResetPassword(req, res);
+      if (route === 'POST /api/change-password') {
+        const session = await requireSession(req, res);
+        if (!session) return;
+        return await handleChangePassword(req, res, session);
+      }
+      if (route === 'PATCH /api/me') {
+        const session = await requireSession(req, res);
+        if (!session) return;
+        return await handleUpdateMe(req, res, session);
+      }
       if (route === 'GET /api/data') {
         const session = await requireSession(req, res);
         if (!session) return;
