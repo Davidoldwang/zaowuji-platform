@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="造物集 · 文创产品开发管理平台登录与公司注册">
+  <title>登录 · 造物集文创业务管理平台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2318352d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' fill='white'%3E造%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="login.css">
+</head>
+<body>
+  <div class="auth-shell">
+    <aside class="auth-aside">
+      <div class="aside-brand">
+        <span class="aside-mark">造</span>
+        <span><strong>造物集</strong><small>文创业务管理平台</small></span>
+      </div>
+      <div class="aside-body">
+        <span class="aside-eyebrow">CULTURAL CREATIVE SUITE</span>
+        <h1>把每一个好创意，<br><em>稳稳落地。</em></h1>
+        <p>客户、产品、开发进度、团队协作与库存账实，在一处清晰流转。每家公司独立账号，数据互不可见。</p>
+        <div class="aside-list">
+          <div class="aside-item"><i>01</i><div><b>项目全流程可视</b><span>设计、打样、定稿到大货生产，节点延期一目了然</span></div></div>
+          <div class="aside-item"><i>02</i><div><b>成本与毛利自动测算</b><span>设计费、打样费、开模费摊销，实时得出成本价</span></div></div>
+          <div class="aside-item"><i>03</i><div><b>库存流水账实相符</b><span>独立出入库登记，库存自动更新且不会为负</span></div></div>
+        </div>
+      </div>
+      <div class="aside-foot">© 2026 造物集 · 文创产品开发进度管理平台</div>
+    </aside>
+
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-head">
+          <h2 id="authTitle">欢迎回来</h2>
+          <p id="authDesc">使用公司分配的账号登录，进入你所在公司的工作台。</p>
+        </div>
+
+        <div class="auth-tabs" role="tablist">
+          <button type="button" class="active" data-tab="login" role="tab">登录</button>
+          <button type="button" data-tab="register" role="tab">注册公司</button>
+        </div>
+
+        <div class="auth-alert" id="authAlert"></div>
+
+        <form class="auth-form" id="loginForm" novalidate>
+          <div class="field">
+            <label for="loginUsername">登录账号</label>
+            <input id="loginUsername" name="username" type="text" autocomplete="username" placeholder="请输入账号" required>
+          </div>
+          <div class="field">
+            <label for="loginPassword">密码</label>
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+          </div>
+          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">登录进入工作台</span></button>
+        </form>
+
+        <form class="auth-form hidden" id="registerForm" novalidate>
+          <div class="field">
+            <label for="regCompany">公司名称 <em>*</em></label>
+            <input id="regCompany" name="companyName" type="text" autocomplete="organization" placeholder="例如：宋韵文化有限公司" required>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="regCredit">统一社会信用代码</label>
+              <input id="regCredit" name="creditCode" type="text" placeholder="选填，用于合同抬头" maxlength="40">
+            </div>
+            <div class="field">
+              <label for="regContact">联系人</label>
+              <input id="regContact" name="contact" type="text" autocomplete="name" placeholder="例如：林然" maxlength="30">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="regPhone">联系电话</label>
+              <input id="regPhone" name="phone" type="tel" autocomplete="tel" placeholder="手机或固定电话" maxlength="20">
+            </div>
+            <div class="field">
+              <label for="regEmail">企业邮箱</label>
+              <input id="regEmail" name="email" type="email" autocomplete="email" placeholder="选填" maxlength="80">
+            </div>
+          </div>
+          <div class="field">
+            <label for="regUsername">登录账号 <em>*</em></label>
+            <input id="regUsername" name="username" type="text" autocomplete="username" placeholder="3-32 位字母、数字、下划线" maxlength="32" required>
+            <small>注册后作为该公司的管理员账号，登录后即可录入本公司数据。</small>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="regPassword">密码 <em>*</em></label>
+              <input id="regPassword" name="password" type="password" autocomplete="new-password" placeholder="至少 8 位" required>
+            </div>
+            <div class="field">
+              <label for="regPassword2">确认密码 <em>*</em></label>
+              <input id="regPassword2" name="password2" type="password" autocomplete="new-password" placeholder="再次输入" required>
+            </div>
+          </div>
+          <button class="auth-submit" type="submit"><span class="spinner"></span><span class="label">注册并进入工作台</span></button>
+        </form>
+
+        <p class="auth-foot">注册即代表你同意以本公司名义管理平台内的业务数据。<br>忘记密码请联系本公司管理员重置。</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="login.js"></script>
+</body>
+</html>

@@ -4,6 +4,12 @@
 dist/
 .workbuddy/
 node_modules/
+data/
+.localdata/
 *.png
 verify.js
 verify-mobile.js
+verify-auth.js
+overview.md
+README.md
+css2

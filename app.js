@@ -39,6 +39,7 @@ const icons = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   x: '<path d="m6 6 12 12M18 6 6 18"/>',
   arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
+  logout: '<path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h9"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -152,15 +153,103 @@ const seed = {
   payments: []
 };
 
-let db;
-try {
-  const saved = localStorage.getItem('zaowuji-business-db-v1');
-  db = saved ? JSON.parse(saved) : structuredClone(seed);
-} catch (error) {
-  db = structuredClone(seed);
+/* ---------------- 账号会话与云端数据 ---------------- */
+const SESSION_KEY = 'zwj_session_v1';
+const EMPTY_DB = () => ({clients:[],products:[],projects:[],tasks:[],movements:[],invoices:[],payments:[]});
+const readSession = () => {
+  try { const raw = localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (error) { return null; }
+};
+const clearSession = () => localStorage.removeItem(SESSION_KEY);
+
+let session = readSession();
+let db = EMPTY_DB();
+let saveTimer = null;
+let savingPending = false;
+let resaveAfter = false;
+
+// 未登录时带上当前页面，登录后原路返回
+const goLogin = () => {
+  const here = location.pathname.split('/').pop() || 'index.html';
+  location.replace(`login.html?next=${encodeURIComponent(here)}`);
+};
+
+async function apiFetch(pathname, options = {}) {
+  const headers = Object.assign({'Content-Type':'application/json'}, options.headers || {});
+  if (session && session.token) headers.Authorization = `Bearer ${session.token}`;
+  const res = await fetch(pathname, Object.assign({}, options, {headers}));
+  let data = null;
+  try { data = await res.json(); } catch (error) { data = null; }
+  if (res.status === 401) {
+    clearSession();
+    goLogin();
+    throw new Error('登录状态已失效，请重新登录');
+  }
+  if (!res.ok) throw new Error((data && data.error) || `请求失败（${res.status}）`);
+  return data;
 }
+
+const normalizeDb = data => ({
+  clients: Array.isArray(data && data.clients) ? data.clients : [],
+  products: Array.isArray(data && data.products) ? data.products : [],
+  projects: Array.isArray(data && data.projects) ? data.projects : [],
+  tasks: Array.isArray(data && data.tasks) ? data.tasks : [],
+  movements: Array.isArray(data && data.movements) ? data.movements : [],
+  invoices: Array.isArray(data && data.invoices) ? data.invoices : [],
+  payments: Array.isArray(data && data.payments) ? data.payments : []
+});
+
+const isDbEmpty = () => ['clients','products','projects','tasks','movements','invoices'].every(key => !db[key].length);
+
+// 保存节流：连续操作只提交最后一次，避免频繁写库
+const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 450); };
+
+async function persistNow() {
+  if (savingPending) { resaveAfter = true; return; }
+  savingPending = true;
+  try {
+    await apiFetch('/api/data', {method:'PUT', body: JSON.stringify(db)});
+    syncBadge('已同步到云端');
+  } catch (error) {
+    if (error.message.indexOf('登录状态') === -1) {
+      syncBadge('保存失败', true);
+      toast(`保存失败：${error.message}`, true);
+    }
+  } finally {
+    savingPending = false;
+    if (resaveAfter) { resaveAfter = false; save(); }
+  }
+}
+
+function syncBadge(text, isError = false) {
+  const chip = $('#syncBadge');
+  if (!chip) return;
+  chip.textContent = text;
+  chip.classList.toggle('error', isError);
+  clearTimeout(syncBadge.timer);
+  if (!isError) syncBadge.timer = setTimeout(() => { chip.textContent = '云端已同步'; }, 2000);
+}
+
+function applyAccountUI() {
+  const user = session && session.user;
+  if (!user) return;
+  const name = user.displayName || user.username;
+  const companyName = (session.company && session.company.name) || '未命名公司';
+  window.__companyName = companyName;
+  const avatar = $('.profile .avatar'); if (avatar) avatar.textContent = name.slice(0,1);
+  const strong = $('.profile strong'); if (strong) strong.textContent = name;
+  const small = $('.profile small'); if (small) small.textContent = companyName;
+  const sub = $('#mHeaderSub'); if (sub) sub.textContent = companyName;
+  const chip = $('#syncBadge'); if (chip) chip.textContent = '云端已同步';
+}
+
+async function logout() {
+  try { await apiFetch('/api/logout', {method:'POST'}); } catch (error) { /* 本地清理即可 */ }
+  clearSession();
+  location.replace('login.html');
+}
+
 const ui = {page:'dashboard',taskView:'team',inventoryTab:'stock',filters:{},modalDirty:false};
-const save = () => localStorage.setItem('zaowuji-business-db-v1', JSON.stringify(db));
 const clientById = id => db.clients.find(x => x.id === id);
 const productById = id => db.products.find(x => x.id === id);
 const projectById = id => db.projects.find(x => x.id === id);
@@ -244,7 +333,9 @@ function renderDashboard() {
   const prevValues = [27,36,40,49,52,61];
   const monthLabels = Array.from({length:6},(_,i)=>{const d=new Date(now.getFullYear(),now.getMonth()-5+i,1);return `${d.getMonth()+1}月`;});
   const focus = getReminders().filter(r=>(r.kind==='project'&&projectIds.includes(r.id))||(r.kind==='task'&&pendingTasks.some(t=>t.id===r.id))).slice(0,4);
+  const welcome = isDbEmpty() ? `<section class="welcome-panel"><div><span class="eyebrow">GET STARTED</span><h2>这家公司还没有业务数据</h2><p>先到「客户管理」建一条客户，再新建项目；也可以载入一套示例数据，熟悉流程后再清空重录。</p></div><div class="welcome-actions"><button class="primary-btn" data-action="add-client">${icon('plus')}新增客户</button><button class="secondary-btn" data-action="load-demo">${icon('spark')}载入示例数据</button></div></section>` : '';
   return `${pageHeading('WORKSPACE OVERVIEW','把每一个好创意，稳稳落地。','项目、产品、协作与经营数据，今天也一目了然。',`<span class="date-chip">数据更新于刚刚</span><button class="secondary-btn" data-action="export" data-type="dashboard">${icon('download')}导出经营简报</button>`)}
+  ${welcome}
   ${filterBar('dashboard','快速查询项目、编号或客户…',selectFilter('dashboard','client',db.clients.map(c=>[c.id,c.company]),f.client)+selectFilter('dashboard','product',db.products.map(p=>[p.id,p.name]),f.product)+selectFilter('dashboard','time',[['7','近 7 天交付'],['30','近 30 天交付'],['90','近 90 天交付']],f.time)+selectFilter('dashboard','manager',ownerOptions,f.manager))}
   <section class="stats-grid">
     <div class="stat-card"><div class="stat-top"><span>进行中项目</span><i class="stat-icon">${icon('route')}</i></div><div class="stat-value">${active.length}<small>个</small></div><div class="stat-foot"><span class="trend-warm">${active.filter(projectDelayed).length} 个存在延期</span><span>· 共 ${scopedProjects.length} 个项目</span></div></div>
@@ -551,8 +642,7 @@ document.addEventListener('click',event=>{
   const close=event.target.closest('[data-close]');if(close){close.dataset.close==='modal'?closeModal():closeDrawer();return;}
   const el=event.target.closest('[data-action]');if(!el)return;
   const {action,id}=el.dataset;
-  if(action==='add-client')openClientForm();
-  if(action==='edit-client')openClientForm(id);
+  if(action==='add-client')openClientForm();  if(action==='edit-client')openClientForm(id);
   if(action==='view-client')openClientDetail(id);
   if(action==='add-product')openProductForm();
   if(action==='edit-product')openProductForm(id);
@@ -566,6 +656,7 @@ document.addEventListener('click',event=>{
   if(action==='add-invoice')openInvoiceForm(id);
   if(action==='add-payment')openPaymentForm(id);
   if(action==='open-reminders')openReminders();
+  if(action==='load-demo'){db=normalizeDb(structuredClone(seed));save();render();toast('已载入示例数据，可直接修改或清空');}
   if(action==='task-view'){ui.taskView=el.dataset.view;render();}
   if(action==='inventory-tab'){ui.inventoryTab=el.dataset.tab;ui.filters.inventory={};render();}
   if(action==='export')exportCSV(el.dataset.type||ui.page);
@@ -594,13 +685,31 @@ $('#drawerMask').addEventListener('click',closeDrawer);
 $('#modalMask').addEventListener('click',e=>{if(e.target===$('#modalMask'))closeModal();});
 $('#menuToggle').addEventListener('click',()=>{$('#sidebar').classList.add('show');$('#mobileMask').classList.add('show');});
 $('#mobileMask').addEventListener('click',()=>{$('#sidebar').classList.remove('show');$('#mobileMask').classList.remove('show');});
-$('#profileBtn').addEventListener('click',()=>toast('当前以业务管理员「林然」身份登录'));
+$('#profileBtn').addEventListener('click',()=>{
+  const user = (session && session.user) || {};
+  const companyName = (session && session.company && session.company.name) || '';
+  toast(`当前账号「${user.displayName || user.username || '未登录'}」· ${companyName}`);
+});
+const logoutBtn = $('#logoutBtn'); if (logoutBtn) logoutBtn.addEventListener('click', logout);
+const mLogoutBtn = $('#mLogoutBtn'); if (mLogoutBtn) mLogoutBtn.addEventListener('click', logout);
 document.addEventListener('keydown',event=>{
   if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='k'){event.preventDefault();$('#globalSearch').focus();}
   if(event.key==='Escape'){closeModal();closeDrawer();$('#searchResults').classList.remove('show');}
 });
 document.addEventListener('click',event=>{if(!event.target.closest('.global-search'))$('#searchResults').classList.remove('show');});
 
-// 初始化图标与首屏。
-$$('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon));
-render();
+// 初始化：先确认登录态，再拉取本公司数据，最后渲染首屏。
+async function bootApp() {
+  applyAccountUI();
+  try {
+    db = normalizeDb(await apiFetch('/api/data'));
+  } catch (error) {
+    if (error.message.indexOf('登录状态') !== -1) return;
+    toast(`加载数据失败：${error.message}`, true);
+  }
+  $$('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
+  render();
+}
+
+if (session && session.token) bootApp();
+else goLogin();

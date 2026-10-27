@@ -3,11 +3,12 @@ node_modules/
 dist/
 
 # 本地验证脚本与截图
-verify.js
-verify-mobile.js
+verify*.js
 *.png
 
 # 编辑器与工作区数据
 .workbuddy/
 .DS_Store
 Thumbs.db
+data/
+.localdata/

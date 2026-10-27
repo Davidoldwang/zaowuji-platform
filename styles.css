@@ -416,3 +416,41 @@ tbody tr:hover { background: #fbfcfa; }
   .detail-section { margin-left:18px; margin-right:18px; }
   .credit-body { grid-template-columns:120px 1fr; }
 }
+
+/* ---------- 账号与云端同步 ---------- */
+.logout-entry {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: calc(100% - 8px); margin: 8px 4px 0; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: transparent; color: var(--muted);
+  font-size: 11px; font-weight: 600; letter-spacing: .4px;
+  transition: .18s;
+}
+.logout-entry:hover { color: var(--red); border-color: rgba(200,84,79,.28); background: var(--red-soft); }
+.logout-entry svg { width: 13px; height: 13px; }
+
+.sync-badge {
+  font-size: 10.5px; color: var(--green); background: var(--green-soft);
+  border: 1px solid rgba(31,90,70,.10);
+  padding: 4px 9px; border-radius: 999px; letter-spacing: .3px;
+  white-space: nowrap;
+}
+.sync-badge.error { color: var(--red); background: var(--red-soft); border-color: rgba(200,84,79,.18); }
+
+.welcome-panel {
+  display: flex; align-items: center; justify-content: space-between; gap: 22px;
+  flex-wrap: wrap;
+  margin-bottom: 18px; padding: 20px 24px;
+  border-radius: 14px;
+  background: linear-gradient(120deg, #1d4438 0%, #18352d 62%, #14312a 100%);
+  color: #f3f1e7;
+  box-shadow: 0 12px 30px rgba(24,53,45,.16);
+}
+.welcome-panel .eyebrow { color: rgba(243,241,231,.45); font-size: 9px; letter-spacing: 2.4px; }
+.welcome-panel h2 { font-family: 'Noto Serif SC', serif; font-size: 18px; margin: 8px 0 7px; letter-spacing: .5px; }
+.welcome-panel p { margin: 0; font-size: 11.5px; line-height: 1.85; color: rgba(243,241,231,.62); max-width: 46em; }
+.welcome-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.welcome-panel .primary-btn { background: #f7f5eb; color: var(--ink); box-shadow: none; }
+.welcome-panel .primary-btn:hover { background: #fff; }
+.welcome-panel .secondary-btn { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.16); color: #f3f1e7; }
+.welcome-panel .secondary-btn:hover { background: rgba(255,255,255,.12); }

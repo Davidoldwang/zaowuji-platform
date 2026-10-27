@@ -252,7 +252,8 @@ function renderMobileInventory() {
 
 function updateMobileShell() {
   const meta = META[ui.page] || META.dashboard;
-  $('#mHeaderSub').textContent = meta.label;
+  // 页头副标题优先显示当前公司，便于确认自己在哪家客户的数据里
+  $('#mHeaderSub').textContent = window.__companyName || meta.label;
   $('#projectNavCount').textContent = db.projects.filter(p=>p.status !== '已完成').length;
   $('#taskNavCount').textContent = db.tasks.filter(t=>t.status !== '已完成').length;
   $('#notificationDot').classList.toggle('show',getReminders().length > 0);

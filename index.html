@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="造物集文创产品开发进度管理平台">
   <title>造物集 · 文创产品开发管理平台</title>
+  <script>try{if(!localStorage.getItem('zwj_session_v1'))location.replace('login.html?next=index.html');}catch(e){}</script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2318352d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='36' fill='white'%3E造%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,10 +41,11 @@
           <i data-icon="arrow"></i>
         </a>
         <button class="profile" id="profileBtn">
-          <span class="avatar">林</span>
-          <span><strong>林然</strong><small>业务管理员</small></span>
+          <span class="avatar">管</span>
+          <span><strong>管理员</strong><small>未命名公司</small></span>
           <i data-icon="more"></i>
         </button>
+        <button class="logout-entry" id="logoutBtn"><span data-icon="logout"></span><b>退出登录</b></button>
       </div>
     </aside>
 
@@ -57,6 +59,7 @@
           <div class="search-results" id="searchResults"></div>
         </div>
         <div class="topbar-actions">
+          <span class="sync-badge" id="syncBadge">云端已同步</span>
           <span class="today-label" id="todayLabel"></span>
           <button class="icon-btn" id="exportBtn" title="导出当前数据"><span data-icon="download"></span></button>
           <button class="icon-btn notification-btn" id="notificationBtn" title="节点提醒"><span data-icon="bell"></span><i id="notificationDot"></i></button>
